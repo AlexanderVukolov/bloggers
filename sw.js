@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-shell-v67";
+const CACHE_NAME = "nsl-bloggers-shell-v68";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
