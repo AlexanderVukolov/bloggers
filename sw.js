@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v69-department-finance";
+const CACHE_NAME = "nsl-bloggers-github-v70-network-first";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
@@ -40,5 +40,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
+  event.respondWith(
+    fetch(request, { cache: "no-store" })
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match(request, { ignoreSearch: true })))
+  );
 });
