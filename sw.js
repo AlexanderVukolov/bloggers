@@ -1,9 +1,10 @@
-const CACHE_NAME = "nsl-bloggers-shell-v64";
+const CACHE_NAME = "nsl-bloggers-shell-v66";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
   `${APP_ROOT}index.html`, `${APP_ROOT}manifest.webmanifest`, `${APP_ROOT}app-icon.svg`, `${APP_ROOT}styles.css`,
   `${APP_ROOT}body-part-1.js`, `${APP_ROOT}body-part-2.js`, `${APP_ROOT}body-loader.js`,
+  `${APP_ROOT}imported-data.js`, `${APP_ROOT}eugenia-stats.js`, `${APP_ROOT}reach-updates.js`,
   `${APP_ROOT}vendor-part-1.js`, `${APP_ROOT}vendor-part-2.js`, `${APP_ROOT}vendor-part-3.js`, `${APP_ROOT}vendor-loader.js`,
   `${APP_ROOT}app-part-1.js`, `${APP_ROOT}app-part-2.js`, `${APP_ROOT}app-part-3.js`, `${APP_ROOT}app-loader.js`
 ];
