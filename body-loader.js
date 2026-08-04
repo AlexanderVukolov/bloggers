@@ -1,0 +1,1 @@
+document.body.innerHTML=window.__bodyParts.join("");delete window.__bodyParts;

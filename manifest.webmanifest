@@ -1,0 +1,20 @@
+{
+  "name": "NSL Bloggers",
+  "short_name": "NSL Bloggers",
+  "description": "Рабочая система отдела блогеров ЛН и FIT PRO",
+  "lang": "ru",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f8",
+  "theme_color": "#10291f",
+  "icons": [
+    {
+      "src": "./app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
