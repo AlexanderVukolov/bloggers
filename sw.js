@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v75-manual-exit-persistence";
+const CACHE_NAME = "nsl-bloggers-github-v76-admin-exit-delete";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
