@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v77-assistant-report-fix";
+const CACHE_NAME = "nsl-bloggers-github-v78-report-dashboard-sync";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
