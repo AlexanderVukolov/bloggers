@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v82-live-blogger-count";
+const CACHE_NAME = "nsl-bloggers-github-v83-placement-summary-parity";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
