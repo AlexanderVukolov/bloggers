@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v80-exit-guarantee-deduplicated";
+const CACHE_NAME = "nsl-bloggers-github-v81-sheet-revenue";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
