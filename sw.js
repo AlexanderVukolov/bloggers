@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v84-live-card-counter";
+const CACHE_NAME = "nsl-bloggers-github-v85-card-recovery";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
