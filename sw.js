@@ -1,12 +1,15 @@
-const CACHE_NAME = "nsl-bloggers-github-v87-clicks-history";
+const CACHE_NAME = "nsl-bloggers-github-v88-secure-shell";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
-  `${APP_ROOT}index.html`, `${APP_ROOT}manifest.webmanifest`, `${APP_ROOT}app-icon.svg`, `${APP_ROOT}styles.css`,
-  `${APP_ROOT}body-part-1.js`, `${APP_ROOT}body-part-2.js`, `${APP_ROOT}body-loader.js`,
-  `${APP_ROOT}imported-data.js`, `${APP_ROOT}eugenia-stats.js`, `${APP_ROOT}reach-updates.js`,
-  `${APP_ROOT}vendor-part-1.js`, `${APP_ROOT}vendor-part-2.js`, `${APP_ROOT}vendor-part-3.js`, `${APP_ROOT}vendor-loader.js`,
-  `${APP_ROOT}app-part-1.js`, `${APP_ROOT}app-part-2.js`, `${APP_ROOT}app-part-3.js`, `${APP_ROOT}app-hotfix-v86.js`, `${APP_ROOT}app-hotfix-v87.js`, `${APP_ROOT}app-loader.js`
+  `${APP_ROOT}index.html`,
+  `${APP_ROOT}manifest.webmanifest`,
+  `${APP_ROOT}app-icon.svg`,
+  `${APP_ROOT}styles.css`,
+  `${APP_ROOT}security-bootstrap-v88.js`,
+  `${APP_ROOT}body-bundle-v88.js`,
+  `${APP_ROOT}vendor-bundle-v88.js`,
+  `${APP_ROOT}app-bundle-v88.js`,
 ];
 
 self.addEventListener("install", (event) => {
@@ -18,7 +21,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim())
+      .then(() => self.clients.claim()),
   );
 });
 
@@ -29,13 +32,13 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-store" })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(`${APP_ROOT}index.html`, copy));
           return response;
         })
-        .catch(() => caches.match(`${APP_ROOT}index.html`).then((cached) => cached || caches.match(APP_ROOT)))
+        .catch(() => caches.match(`${APP_ROOT}index.html`).then((cached) => cached || caches.match(APP_ROOT))),
     );
     return;
   }
@@ -49,6 +52,6 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match(request, { ignoreSearch: true })))
+      .catch(() => caches.match(request).then((cached) => cached || caches.match(request, { ignoreSearch: true }))),
   );
 });

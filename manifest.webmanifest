@@ -3,7 +3,7 @@
   "short_name": "NSL Bloggers",
   "description": "Рабочая система отдела блогеров ЛН и FIT PRO",
   "lang": "ru",
-  "start_url": "./?source=pwa",
+  "start_url": "./?source=pwa&v=88",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
