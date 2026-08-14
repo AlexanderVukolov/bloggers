@@ -1,1 +1,0 @@
-(0,eval)(window.__appParts.join(""));delete window.__appParts;
