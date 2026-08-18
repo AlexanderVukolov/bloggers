@@ -28,6 +28,26 @@
     if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI новых блогеров</h3><p>Все карточки, добавленные менеджером или ассистентом в выбранном месяце, попадают в список автоматически. Администратор может уточнить охват и ответственного.</p>';
   }
 
+  var salaryTable = document.getElementById("salaryTable");
+  if (salaryTable) {
+    var salaryHeaders = salaryTable.closest("table").querySelectorAll("thead th");
+    ["Кат. A","Кат. B","Кат. C"].forEach(function (label,index) { if (salaryHeaders[index + 3]) salaryHeaders[index + 3].textContent = label; });
+    var salaryNote = salaryTable.closest(".card").querySelector(".table-note");
+    if (salaryNote) salaryNote.textContent = "Оклад и KPI рассчитываются автоматически по новым блогерам и фактическому охвату. Администратор может изменить оклад, KPI за охват и санкции за выбранный месяц.";
+    var salarySummary = document.getElementById("salarySummaryGrid");
+    salarySummary.insertAdjacentHTML("afterend", '<article class="card card-pad" id="salaryPolicyCard" style="margin-bottom:16px"><div class="card-title"><div><h3>Правила начисления</h3><p>Категория определяется по охвату нового блогера; на границе 3000 начинается B, на границе 5000 — C</p></div><span class="badge badge-green">Считается автоматически</span></div><div class="grid grid-2"><div class="quality-item"><div><strong>Менеджеры · KPI за блогеров</strong><small>A: 1 000–2 999 — 500 ₽ · B: 3 000–4 999 — 2 700 ₽ · C: от 5 000 — 5 000 ₽</small></div></div><div class="quality-item"><div><strong>Ассистенты · KPI за блогеров</strong><small>A: 1 000–2 999 — 250 ₽ · B: 3 000–4 999 — 1 350 ₽ · C: от 5 000 — 2 500 ₽</small></div></div><div class="quality-item" style="grid-column:1/-1"><div><strong>Менеджеры · KPI за выполнение плана охвата</strong><small>70–79,99% — 6 000 ₽ · 80–89,99% — 10 000 ₽ · 90–99,99% — 15 000 ₽ · 100% и выше — 20 000 ₽</small></div></div></div></article>');
+  }
+
+  var contractDateAnchor = document.getElementById("employeeBaseSalary");
+  if (contractDateAnchor && !document.getElementById("employeeContractDate")) {
+    contractDateAnchor.closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label>Дата договора оказания услуг</label><input class="input" id="employeeContractDate" type="date"></div>');
+  }
+
+  [["kpiCategoryA","Категория A · 1 000–2 999"],["kpiCategoryB","Категория B · 3 000–4 999"],["kpiCategoryC","Категория C · от 5 000"]].forEach(function (item) {
+    var input = document.getElementById(item[0]);
+    if (input) input.closest(".field").querySelector("label").textContent = item[1];
+  });
+
 })();
 /*__IMPORTED_DATA__*/
     /*__EUGENIA_STATS__*/
@@ -128,11 +148,28 @@
         categories:{a:{min:Infinity,max:null,amount:0},b:{min:Infinity,max:null,amount:0},c:{min:Infinity,max:null,amount:0}},
         reachTiers:[{min:0,amount:0,share:0}]
       };
+      var SALARY_RULES = {
+        categories:{a:{min:1000,max:3000},b:{min:3000,max:5000},c:{min:5000,max:null}},
+        bloggerAmounts:{manager:{a:500,b:2700,c:5000},assistant:{a:250,b:1350,c:2500}},
+        managerReachPercentTiers:[
+          {min:100,amount:20000},
+          {min:90,amount:15000},
+          {min:80,amount:10000},
+          {min:70,amount:6000}
+        ]
+      };
+      var SALARY_PROFILES = [
+        {firstName:"Оксана",lastName:"Пичушкина",role:"manager",baseSalary:35000,contractDate:"2026-02-21"},
+        {firstName:"Евгения",lastName:"Оржел",role:"manager",baseSalary:40000,contractDate:"2026-02-24"},
+        {firstName:"Ольга",lastName:"Петухова",role:"manager",baseSalary:30000,contractDate:"2026-08-12"},
+        {firstName:"Юлия",lastName:"Сударинова",role:"assistant",baseSalary:15000,contractDate:"2026-06-22"}
+      ];
       var kpiAdjustmentsLoaded = false;
       var kpiMonthBloggers = [];
       var kpiRosterLoadedMonths = {};
       var baseEmployees = [];
       var employees = JSON.parse(sessionStorage.getItem("nslEmployees") || "null") || baseEmployees.map(function (item) { return Object.assign({},item); });
+      var employeeSalaryProfiles = JSON.parse(sessionStorage.getItem("nslEmployeeSalaryProfiles") || "null") || {};
       var placementRecords = importedData ? importedData.placements : [];
       var reelRecords = importedData ? importedData.reels : [];
       var deletedPlacements = JSON.parse(sessionStorage.getItem("nslDeletedPlacements") || "{}");
@@ -1433,6 +1470,7 @@
       function sharedNewBloggerRecord(blogger) { return sharedStateRecord("blogger_create",blogger.id,blogger); }
       function sharedContractRecord(blogger) { return sharedStateRecord("blogger_contract",blogger.id,{id:blogger.id,sourceKey:blogger.sourceKey,name:blogger.name,link:blogger.link,commercialContract:blogger.commercialContract,barterContract:blogger.barterContract,cooperationType:blogger.cooperationType}); }
       function sharedPlacementRecord(item) { return sharedStateRecord("placement",item.id,item); }
+      function sharedEmployeeSalaryProfileRecord(employeeId,profile) { return sharedStateRecord("employee_salary_profile",employeeId,profile); }
       function placementDeletionKey(item) {
         if (item && item.sourcePlacementId != null && item.sourcePlacementId !== "") return String(item.sourcePlacementId);
         var identity = normalizeBloggerIdentity((item && (item.sourceKey || item.tag || item.bloggerLink)) || "") || "unknown";
@@ -1506,6 +1544,7 @@
         Object.keys(monthlyManagerPlans).forEach(function (month) { Object.keys(monthlyManagerPlans[month] || {}).forEach(function (name) { records.push(sharedStateRecord("monthly_plan",month + "|" + name,{month:month,name:name,plan:monthlyManagerPlans[month][name]})); }); });
         additionalPlacementFormats.forEach(function (item) { records.push(sharedStateRecord("placement_format",item.id,item)); });
         Object.keys(managerMetrics).forEach(function (name) { records.push(sharedStateRecord("manager_metrics",name,{name:name,metrics:managerMetrics[name]})); });
+        Object.keys(employeeSalaryProfiles).forEach(function (employeeId) { records.push(sharedEmployeeSalaryProfileRecord(employeeId,employeeSalaryProfiles[employeeId])); });
         return records.slice(0,500);
       }
       function normalizeBootstrapBlogger(item,index) {
@@ -1618,6 +1657,11 @@
           return;
         }
         if (record.namespace === "manager_metrics" && value.name) managerMetrics[value.name] = value.metrics || {};
+        if (record.namespace === "employee_salary_profile") {
+          employeeSalaryProfiles[String(record.key)] = Object.assign({},value);
+          sessionStorage.setItem("nslEmployeeSalaryProfiles",JSON.stringify(employeeSalaryProfiles));
+          return;
+        }
       }
       function cacheSharedStateLocally() {
         sessionStorage.setItem("nslBloggers",JSON.stringify(bloggers));
@@ -1874,10 +1918,8 @@
           employees = records;
           if (currentEmployeeProfile) currentEmployeeProfile = employees.find(function (item) { return item.id === currentEmployeeProfile.id; }) || currentEmployeeProfile;
           employees.forEach(function (employee) {
-            if (employee.role === "manager") {
-              ensureManagerMetrics(employee.name);
-              salarySetting(employee.name).base = Number(employee.baseSalary || 0);
-            }
+            if (employee.role === "manager") ensureManagerMetrics(employee.name);
+            if (employee.role === "manager" || employee.role === "assistant") salarySetting(employee.name).base = effectiveEmployeeBaseSalary(employee);
           });
           cacheEmployees();
           sessionStorage.setItem("nslManagerMetrics",JSON.stringify(managerMetrics));
@@ -1929,6 +1971,48 @@
       function employeeNameMatches(employeeOrName,recordName) {
         var normalized = String(recordName || "").trim().toLowerCase();
         return employeeAliases(employeeOrName).some(function (value) { return value.toLowerCase() === normalized; });
+      }
+      function normalizedSalaryNameTokens(value) {
+        return String(value || "").trim().toLowerCase().replace(/ё/g,"е").replace(/[^a-zа-я0-9]+/g," ").split(" ").filter(Boolean);
+      }
+      function salaryProfileForName(value) {
+        var tokens = normalizedSalaryNameTokens(value);
+        return SALARY_PROFILES.find(function (profile) {
+          return tokens.indexOf(profile.firstName.toLowerCase().replace(/ё/g,"е")) >= 0 && tokens.indexOf(profile.lastName.toLowerCase().replace(/ё/g,"е")) >= 0;
+        }) || null;
+      }
+      function defaultSalaryProfileForEmployee(employee) {
+        if (!employee) return null;
+        var candidates = [employee.name].concat(Array.isArray(employee.historyAliases) ? employee.historyAliases : []);
+        for (var index = 0; index < candidates.length; index += 1) {
+          var profile = salaryProfileForName(candidates[index]);
+          if (profile) return profile;
+        }
+        return null;
+      }
+      function effectiveEmployeeSalaryProfile(employee) {
+        var policy = defaultSalaryProfileForEmployee(employee) || {};
+        var saved = employee && employee.id ? employeeSalaryProfiles[String(employee.id)] || {} : {};
+        return {
+          baseSalary:Number(Object.prototype.hasOwnProperty.call(saved,"baseSalary") ? saved.baseSalary : Object.prototype.hasOwnProperty.call(policy,"baseSalary") ? policy.baseSalary : employee && employee.baseSalary || 0),
+          contractDate:String(Object.prototype.hasOwnProperty.call(saved,"contractDate") ? saved.contractDate || "" : policy.contractDate || employee && employee.contractDate || ""),
+          source:Object.keys(saved).length ? "admin" : Object.keys(policy).length ? "policy" : "employee"
+        };
+      }
+      function effectiveEmployeeBaseSalary(employee) {
+        return Math.max(0,Number(effectiveEmployeeSalaryProfile(employee).baseSalary || 0));
+      }
+      function saveEmployeeSalaryProfile(employee,baseSalary,contractDate) {
+        if (!employee || !employee.id) return;
+        var profile = {employeeId:String(employee.id),employeeName:employee.name,baseSalary:Math.max(0,Number(baseSalary || 0)),contractDate:String(contractDate || ""),updatedAt:new Date().toISOString()};
+        employeeSalaryProfiles[String(employee.id)] = profile;
+        sessionStorage.setItem("nslEmployeeSalaryProfiles",JSON.stringify(employeeSalaryProfiles));
+        queueSharedStateRecords([sharedEmployeeSalaryProfileRecord(employee.id,profile)]);
+      }
+      function employeeContractLabel(employee) {
+        var contractDate = effectiveEmployeeSalaryProfile(employee).contractDate;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(contractDate)) return "Договор не указан";
+        return "Договор от " + new Date(contractDate + "T12:00:00").toLocaleDateString("ru-RU");
       }
       function employeeNamedRecord(source,employeeOrName) {
         source = source || {};
@@ -2287,7 +2371,7 @@
             month:month,
             bloggerKey:String(blogger.id),
             bloggerName:blogger.display || blogger.name,
-            manager:blogger.manager || blogger.createdByName || "Не назначен",
+            manager:blogger.manager || (blogger.createdByRole === "manager" ? blogger.createdByName || "" : "") || "Не назначен",
             assistant:blogger.createdByRole === "assistant" ? blogger.createdByName || "" : "",
             factReach:Math.max(0,Number(blogger.reach || 0)),
             note:"Добавлен автоматически по дате создания",
@@ -2345,9 +2429,36 @@
         if (!salarySettings[manager].manualReachKpi) salarySettings[manager].manualReachKpi = {};
         return salarySettings[manager];
       }
-      function reachKpiAmount(reach) {
-        var tier = KPI_RULES.reachTiers.find(function (item) { return Number(reach || 0) >= item.min; });
+      function reachKpiAmount(reachPercent) {
+        var tier = SALARY_RULES.managerReachPercentTiers.find(function (item) { return Number(reachPercent || 0) >= item.min; });
         return tier ? tier.amount : 0;
+      }
+      function salaryBloggerCategory(reach) {
+        var value = Number(reach || 0);
+        if (value >= SALARY_RULES.categories.c.min) return "c";
+        if (value >= SALARY_RULES.categories.b.min) return "b";
+        if (value >= SALARY_RULES.categories.a.min) return "a";
+        return "";
+      }
+      function salaryBloggerAmount(roleName,category) {
+        var roleAmounts = SALARY_RULES.bloggerAmounts[roleName] || {};
+        return Number(roleAmounts[category] || 0);
+      }
+      function bloggerKpiForEmployee(employeeOrName,roleName,month) {
+        var records = resolvedKpiMonthBloggers(month).filter(function (item) {
+          var responsible = roleName === "assistant" ? item.assistant : item.manager;
+          return responsible && employeeNameMatches(employeeOrName,responsible);
+        });
+        var counts = {a:0,b:0,c:0};
+        var factReach = 0;
+        records.forEach(function (item) {
+          var reach = Math.max(0,Number(item.factReach || 0));
+          var category = salaryBloggerCategory(reach);
+          factReach += reach;
+          if (category) counts[category] += 1;
+        });
+        var amount = counts.a * salaryBloggerAmount(roleName,"a") + counts.b * salaryBloggerAmount(roleName,"b") + counts.c * salaryBloggerAmount(roleName,"c");
+        return {a:counts.a,b:counts.b,c:counts.c,amount:amount,factReach:Math.round(factReach),records:records.length,confirmed:counts.a + counts.b + counts.c};
       }
       function employeeByName(name) {
         return employees.find(function (item) { return item.name === name; });
@@ -2369,51 +2480,53 @@
       function calculateManagerSalary(manager,month) {
         var rows = kpiRowsForManager(manager,month);
         var pending = synchronizedPlacementRecords().filter(function (item) { return employeeNameMatches(manager,item.manager) && (item.sortDate || "").slice(0,7) === month && !(item.actual != null && Number(item.actual) > 0 && Number(item.actual) <= MAX_REACH_PER_FORMAT); }).length;
-        var counts = {a:0,b:0,c:0};
         var factReach = 0;
-        var bloggerReach = {};
         var evidenceCount = 0;
         rows.forEach(function (item) {
           var reach = Number(item.actual || 0);
           factReach += reach;
           if (kpiEvidenceForPlacement(item)) evidenceCount += 1;
-          var linkedBlogger = linkedBloggerForPlacement(item);
-          var key = linkedBlogger ? "id:" + String(linkedBlogger.id) : (normalizeBloggerIdentity(item.sourceKey || item.tag) || String(item.sourceKey || item.tag));
-          bloggerReach[key] = Math.max(Number(bloggerReach[key] || 0),reach);
-        });
-        var manualRows = resolvedKpiMonthBloggers(month).filter(function (item) { return employeeNameMatches(manager,item.manager); });
-        manualRows.forEach(function (item) {
-          var key = "id:" + String(item.bloggerKey);
-          var previous = Number(bloggerReach[key] || 0);
-          var manualReach = Number(item.factReach || 0);
-          if (manualReach > previous) factReach += manualReach - previous;
-          bloggerReach[key] = Math.max(previous,manualReach);
         });
         factReach = Math.round(factReach);
-        Object.keys(bloggerReach).forEach(function (key) {
-          var reach = bloggerReach[key];
-          if (reach >= KPI_RULES.categories.c.min) counts.c += 1;
-          else if (reach >= KPI_RULES.categories.b.min) counts.b += 1;
-          else if (reach >= KPI_RULES.categories.a.min) counts.a += 1;
-        });
+        var bloggerResult = bloggerKpiForEmployee(manager,"manager",month);
         var setting = salarySetting(manager);
         var employee = employeeByName(manager);
-        var base = employee ? Number(employee.baseSalary || 0) : Number(setting.base || 0);
+        var base = employee ? effectiveEmployeeBaseSalary(employee) : Number(setting.base || 0);
         setting.base = base;
-        var bloggerKpi = counts.a * KPI_RULES.categories.a.amount + counts.b * KPI_RULES.categories.b.amount + counts.c * KPI_RULES.categories.c.amount;
-        var autoReachKpi = reachKpiAmount(factReach);
+        var plan = monthlyPlanSetting(manager,month);
+        var planReach = Math.max(0,Number(plan.reach || KPI_RULES.planReach || 0));
+        var reachPct = planReach > 0 ? factReach / planReach * 100 : 0;
+        var bloggerKpi = bloggerResult.amount;
+        var autoReachKpi = reachKpiAmount(reachPct);
         var hasManualReachKpi = Object.prototype.hasOwnProperty.call(setting.manualReachKpi,month);
         var manualReachKpi = hasManualReachKpi ? Number(setting.manualReachKpi[month] || 0) : null;
         var reachKpi = hasManualReachKpi ? manualReachKpi : autoReachKpi;
         var sanctions = Number(setting.sanctions[month] || 0);
         var totalKpi = Math.max(0,bloggerKpi + reachKpi - sanctions);
-        return {manager:manager,a:counts.a,b:counts.b,c:counts.c,factReach:factReach,reachPct:factReach/Math.max(1,Number(KPI_RULES.planReach || 0))*100,bloggerKpi:bloggerKpi,autoReachKpi:autoReachKpi,manualReachKpi:manualReachKpi,reachKpi:reachKpi,sanctions:sanctions,totalKpi:totalKpi,base:base,salary:base+totalKpi,confirmed:Object.keys(bloggerReach).length,pending:pending,evidenceCount:evidenceCount,placements:rows.length,manualCount:manualRows.length};
+        return {manager:manager,role:"manager",a:bloggerResult.a,b:bloggerResult.b,c:bloggerResult.c,factReach:factReach,planReach:planReach,reachPct:reachPct,bloggerKpi:bloggerKpi,autoReachKpi:autoReachKpi,manualReachKpi:manualReachKpi,reachKpi:reachKpi,sanctions:sanctions,totalKpi:totalKpi,base:base,salary:base+totalKpi,confirmed:bloggerResult.confirmed,pending:pending,evidenceCount:evidenceCount,placements:rows.length,manualCount:bloggerResult.records};
       }
-      function kpiReachCategory(reach) {
-        if (Number(reach || 0) >= KPI_RULES.categories.c.min) return "C · " + money(KPI_RULES.categories.c.amount);
-        if (Number(reach || 0) >= KPI_RULES.categories.b.min) return "B · " + money(KPI_RULES.categories.b.amount);
-        if (Number(reach || 0) >= KPI_RULES.categories.a.min) return "A · " + money(KPI_RULES.categories.a.amount);
-        return "Не достигнут минимум";
+      function calculateAssistantSalary(assistant,month) {
+        var bloggerResult = bloggerKpiForEmployee(assistant,"assistant",month);
+        var setting = salarySetting(assistant);
+        var employee = employeeByName(assistant);
+        var base = employee ? effectiveEmployeeBaseSalary(employee) : Number(setting.base || 0);
+        setting.base = base;
+        var sanctions = Number(setting.sanctions[month] || 0);
+        var totalKpi = Math.max(0,bloggerResult.amount - sanctions);
+        return {manager:assistant,role:"assistant",a:bloggerResult.a,b:bloggerResult.b,c:bloggerResult.c,factReach:bloggerResult.factReach,planReach:0,reachPct:0,bloggerKpi:bloggerResult.amount,autoReachKpi:0,manualReachKpi:null,reachKpi:0,sanctions:sanctions,totalKpi:totalKpi,base:base,salary:base+totalKpi,confirmed:bloggerResult.confirmed,pending:Math.max(0,bloggerResult.records-bloggerResult.confirmed),evidenceCount:0,placements:0,manualCount:bloggerResult.records};
+      }
+      function calculateEmployeeSalary(employee,month) {
+        if (employee && employee.role === "manager") return calculateManagerSalary(employee.name,month);
+        if (employee && employee.role === "assistant") return calculateAssistantSalary(employee.name,month);
+        var base = effectiveEmployeeBaseSalary(employee);
+        return {manager:employee && employee.name || "",role:employee && employee.role || "",a:0,b:0,c:0,factReach:0,planReach:0,reachPct:0,bloggerKpi:0,autoReachKpi:0,manualReachKpi:null,reachKpi:0,sanctions:0,totalKpi:0,base:base,salary:base,confirmed:0,pending:0,evidenceCount:0,placements:0,manualCount:0};
+      }
+      function kpiReachCategory(reach,roleName) {
+        var category = salaryBloggerCategory(reach);
+        if (!category) return "Не достигнут минимум";
+        var label = category.toUpperCase();
+        if (roleName === "manager" || roleName === "assistant") return label + " · " + money(salaryBloggerAmount(roleName,category));
+        return label + " · менеджер " + money(salaryBloggerAmount("manager",category)) + " · ассистент " + money(salaryBloggerAmount("assistant",category));
       }
       function populateKpiBloggerSelect() {
         var select = document.getElementById("kpiBloggerSelect");
@@ -2477,18 +2590,20 @@
         var month = document.getElementById("salaryMonthFilter").value || activeMonthKey();
         var entries = activeSalaryEmployees().map(function (employee) {
           var isManager = activeEmployeeManagers().indexOf(employee.name) >= 0;
-          var result = isManager ? calculateManagerSalary(employee.name,month) : {a:0,b:0,c:0,factReach:0,reachPct:0,bloggerKpi:0,autoReachKpi:0,manualReachKpi:null,reachKpi:0,sanctions:0,totalKpi:0,base:Number(employee.baseSalary || 0),salary:Number(employee.baseSalary || 0),confirmed:0,pending:0,evidenceCount:0};
-          return {employee:employee,isManager:isManager,result:result};
+          var isAssistant = employee.role === "assistant";
+          var result = calculateEmployeeSalary(employee,month);
+          return {employee:employee,isManager:isManager,isAssistant:isAssistant,hasBloggerKpi:isManager || isAssistant,result:result};
         });
         var totals = entries.reduce(function (sum,entry) {
           var result = entry.result;
           sum.employees += 1;
-          if (entry.isManager) sum.managers += 1;
-          ["base","a","b","c","factReach","bloggerKpi","reachKpi","sanctions","totalKpi","salary"].forEach(function (field) { sum[field] += Number(result[field] || 0); });
+          if (entry.isManager) { sum.managers += 1; sum.planReach += Number(result.planReach || 0); sum.managerFactReach += Number(result.factReach || 0); }
+          ["base","a","b","c","bloggerKpi","reachKpi","sanctions","totalKpi","salary"].forEach(function (field) { sum[field] += Number(result[field] || 0); });
+          if (entry.isManager) sum.factReach += Number(result.factReach || 0);
           return sum;
-        },{employees:0,managers:0,base:0,a:0,b:0,c:0,factReach:0,bloggerKpi:0,reachKpi:0,sanctions:0,totalKpi:0,salary:0});
+        },{employees:0,managers:0,planReach:0,managerFactReach:0,base:0,a:0,b:0,c:0,factReach:0,bloggerKpi:0,reachKpi:0,sanctions:0,totalKpi:0,salary:0});
         var grossKpi = totals.bloggerKpi + totals.reachKpi;
-        var totalReachPct = rate(totals.factReach,totals.managers * KPI_RULES.planReach);
+        var totalReachPct = rate(totals.managerFactReach,totals.planReach);
         var summaryCards = [
           {label:"Общий оклад",value:money(totals.base),foot:totals.employees + " активных сотрудников",icon:"₽",state:"trend-up"},
           {label:"Начислено KPI",value:money(grossKpi),foot:"до вычета санкций",icon:"◆",state:"trend-up"},
@@ -2499,15 +2614,17 @@
         var rows = entries.map(function (entry) {
           var employee = entry.employee;
           var isManager = entry.isManager;
+          var isAssistant = entry.isAssistant;
+          var hasBloggerKpi = entry.hasBloggerKpi;
           var result = entry.result;
           var baseCell = role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.base + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-field="base">' : '<b>' + money(result.base) + '</b>';
-          var sanctionCell = isManager ? (role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.sanctions + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-month="' + month + '" data-salary-field="sanctions">' : money(result.sanctions)) : '—';
+          var sanctionCell = hasBloggerKpi ? (role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.sanctions + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-month="' + month + '" data-salary-field="sanctions">' : money(result.sanctions)) : '—';
           var reachKpiCell = isManager ? (role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.reachKpi + '" title="Автоматически: ' + money(result.autoReachKpi) + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-month="' + month + '" data-salary-field="reachKpi">' : money(result.reachKpi)) : '—';
-          var detail = isManager ? result.confirmed + ' зачтено · ' + result.pending + ' ожидают факта' : 'Фиксированный оклад';
+          var detail = employeeContractLabel(employee) + (hasBloggerKpi ? ' · ' + result.confirmed + ' блогеров зачтено' + (result.pending ? ' · ' + result.pending + ' ожидают охват' : '') : ' · фиксированный оклад');
           var status = employee.status === "paused" ? '<span class="badge badge-red">Приостановлен</span>' : '<span class="badge badge-green">Активен</span>';
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(employee.name) + '</div><div><strong>' + safeText(employee.name) + '</strong><small>' + detail + '</small></div></div></td><td><span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span></td><td>' + baseCell + '</td><td>' + (isManager ? result.a : '—') + '</td><td>' + (isManager ? result.b : '—') + '</td><td>' + (isManager ? result.c : '—') + '</td><td><b>' + (isManager ? number(result.factReach) : '—') + '</b></td><td>' + (isManager ? '<span class="' + metricState(result.reachPct,100,.7) + '">' + percent(result.reachPct,1) + '</span>' : '—') + '</td><td>' + (isManager ? money(result.bloggerKpi) : '—') + '</td><td>' + reachKpiCell + '</td><td>' + sanctionCell + '</td><td><b>' + money(result.totalKpi) + '</b></td><td><b style="color:var(--green-2)">' + money(result.salary) + '</b></td><td>' + status + '</td></tr>';
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(employee.name) + '</div><div><strong>' + safeText(employee.name) + '</strong><small>' + detail + '</small></div></div></td><td><span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span></td><td>' + baseCell + '</td><td>' + (hasBloggerKpi ? result.a : '—') + '</td><td>' + (hasBloggerKpi ? result.b : '—') + '</td><td>' + (hasBloggerKpi ? result.c : '—') + '</td><td><b>' + (hasBloggerKpi ? number(result.factReach) : '—') + '</b></td><td>' + (isManager ? '<span class="' + metricState(result.reachPct,100,.7) + '">' + percent(result.reachPct,1) + '</span>' : isAssistant ? '<span class="badge badge-purple">Не применяется</span>' : '—') + '</td><td>' + (hasBloggerKpi ? money(result.bloggerKpi) : '—') + '</td><td>' + reachKpiCell + '</td><td>' + sanctionCell + '</td><td><b>' + money(result.totalKpi) + '</b></td><td><b style="color:var(--green-2)">' + money(result.salary) + '</b></td><td>' + status + '</td></tr>';
         });
-        if (entries.length) rows.push('<tr class="manager-total"><td><div class="blogger-cell"><div class="mini-avatar">Σ</div><div><strong>Итого по всем сотрудникам</strong><small>' + safeText(kpiMonthLabel(month)) + ' · оклад + KPI − санкции</small></div></div></td><td><span class="badge badge-green">Все роли</span></td><td><b>' + money(totals.base) + '</b></td><td><b>' + number(totals.a) + '</b></td><td><b>' + number(totals.b) + '</b></td><td><b>' + number(totals.c) + '</b></td><td><b>' + number(totals.factReach) + '</b></td><td><span class="' + metricState(totalReachPct,100,.7) + '">' + percent(totalReachPct,1) + '</span></td><td><b>' + money(totals.bloggerKpi) + '</b></td><td><b>' + money(totals.reachKpi) + '</b></td><td><b style="color:var(--red)">− ' + money(totals.sanctions) + '</b></td><td><b>' + money(totals.totalKpi) + '</b></td><td><b style="color:var(--green-2)">' + money(totals.salary) + '</b></td><td><span class="badge badge-green">' + totals.employees + ' сотрудников</span></td></tr>');
+        if (entries.length) rows.push('<tr class="manager-total"><td><div class="blogger-cell"><div class="mini-avatar">Σ</div><div><strong>Итого по всем сотрудникам</strong><small>' + safeText(kpiMonthLabel(month)) + ' · оклад + KPI − санкции</small></div></div></td><td><span class="badge badge-green">Все роли</span></td><td><b>' + money(totals.base) + '</b></td><td><b>' + number(totals.a) + '</b></td><td><b>' + number(totals.b) + '</b></td><td><b>' + number(totals.c) + '</b></td><td><b>' + number(totals.factReach) + '</b></td><td>' + (totals.planReach ? '<span class="' + metricState(totalReachPct,100,.7) + '">' + percent(totalReachPct,1) + '</span>' : '—') + '</td><td><b>' + money(totals.bloggerKpi) + '</b></td><td><b>' + money(totals.reachKpi) + '</b></td><td><b style="color:var(--red)">− ' + money(totals.sanctions) + '</b></td><td><b>' + money(totals.totalKpi) + '</b></td><td><b style="color:var(--green-2)">' + money(totals.salary) + '</b></td><td><span class="badge badge-green">' + totals.employees + ' сотрудников</span></td></tr>');
         document.getElementById("salaryTable").innerHTML = rows.join("") || '<tr><td colspan="14"><div class="empty-state">Добавьте активных сотрудников в разделе «Сотрудники» — после этого расчёт появится автоматически.</div></td></tr>';
       }
       function employeeAssistantMonthStats(name,month) {
@@ -2529,7 +2646,7 @@
         var latestDate = dashboardReportDates(month)[0] || new Date().toISOString().slice(0,10);
         grid.innerHTML = employees.map(function (employee) {
           var stats = [];
-          var salary = Number(employee.baseSalary || 0);
+          var salary = effectiveEmployeeBaseSalary(employee);
           if (employee.role === "manager") {
             var outreach = managerOutreachSummary(employee.name,month,latestDate);
             var fact = monthlyManagerFact(employee.name,month);
@@ -2538,6 +2655,7 @@
           } else if (employee.role === "assistant") {
             var assistant = employeeAssistantMonthStats(employee.name,month);
             stats = [[assistant.transferred,"передано"],[assistant.outreach,"рассылок"],[assistant.approvals,"согласий"]];
+            salary = calculateAssistantSalary(employee.name,month).salary;
           } else if (employee.role === "analyst") {
             stats = [["Отчёты","доступ"],["Дашборды","доступ"],["Просмотр","режим"]];
           } else {
@@ -2548,7 +2666,7 @@
           var accessLabel = employee.accessStatus === "connected" ? "Кабинет подключён" : employee.accessStatus === "invited" ? "Ссылка создана" : "Доступ не создан";
           var accessClass = employee.accessStatus === "connected" ? "badge-green" : employee.accessStatus === "invited" ? "badge-amber" : "badge-red";
           var assigned = employee.role === "assistant" && employee.assignedManager ? " · закреплён за " + safeText(employee.assignedManager) : "";
-          return '<article class="card team-card"><div class="team-top"><div class="avatar">' + initials(employee.name) + '</div><div><h4>' + safeText(employee.name) + '</h4><p>' + safeText(employee.email) + assigned + '</p></div><span class="badge ' + employeeRoleBadge(employee.role) + ' team-role">' + employeeRoleLabel(employee.role) + '</span></div><div class="team-stats">' + stats.map(function (item) { return '<div class="team-stat"><strong>' + (typeof item[0] === "number" ? number(item[0]) : safeText(item[0])) + '</strong><span>' + item[1] + '</span></div>'; }).join("") + '</div><div class="salary"><span>Оклад / зарплата · ' + monthLabel.toLowerCase() + '</span><b>' + money(salary) + '</b></div><div class="access-status"><span class="badge ' + statusClass + '">' + statusLabel + '</span><span class="badge ' + accessClass + '">' + accessLabel + '</span></div><div class="team-card-actions"><button class="btn btn-sm btn-outline" type="button" data-open-employee-profile="' + safeText(employee.id) + '">Кабинет</button><button class="btn btn-sm btn-outline" type="button" data-create-employee-access="' + safeText(employee.id) + '">' + (employee.accessStatus === "connected" ? "Новая ссылка" : "Создать доступ") + '</button><button class="btn btn-sm btn-outline" type="button" data-edit-employee="' + safeText(employee.id) + '">Редактировать</button></div></article>';
+          return '<article class="card team-card"><div class="team-top"><div class="avatar">' + initials(employee.name) + '</div><div><h4>' + safeText(employee.name) + '</h4><p>' + safeText(employee.email) + assigned + '</p><p>' + safeText(employeeContractLabel(employee)) + '</p></div><span class="badge ' + employeeRoleBadge(employee.role) + ' team-role">' + employeeRoleLabel(employee.role) + '</span></div><div class="team-stats">' + stats.map(function (item) { return '<div class="team-stat"><strong>' + (typeof item[0] === "number" ? number(item[0]) : safeText(item[0])) + '</strong><span>' + item[1] + '</span></div>'; }).join("") + '</div><div class="salary"><span>Оклад / зарплата · ' + monthLabel.toLowerCase() + '</span><b>' + money(salary) + '</b></div><div class="access-status"><span class="badge ' + statusClass + '">' + statusLabel + '</span><span class="badge ' + accessClass + '">' + accessLabel + '</span></div><div class="team-card-actions"><button class="btn btn-sm btn-outline" type="button" data-open-employee-profile="' + safeText(employee.id) + '">Кабинет</button><button class="btn btn-sm btn-outline" type="button" data-create-employee-access="' + safeText(employee.id) + '">' + (employee.accessStatus === "connected" ? "Новая ссылка" : "Создать доступ") + '</button><button class="btn btn-sm btn-outline" type="button" data-edit-employee="' + safeText(employee.id) + '">Редактировать</button></div></article>';
         }).join("") || '<div class="card empty-state">Сотрудники ещё не добавлены.</div>';
       }
       function employeeHistoryMonths(employee) {
@@ -2617,7 +2735,7 @@
         document.getElementById("backToTeamBtn").classList.toggle("hidden",role !== "leader" || !viewingOther);
         document.getElementById("employeeProfileAvatar").textContent = initials(employee.name);
         document.getElementById("employeeProfileName").textContent = employee.name;
-        document.getElementById("employeeProfileMeta").textContent = employee.email + " · " + employeeRoleLabel(employee.role) + (employee.assignedManager ? " · закреплён за " + employee.assignedManager : "");
+        document.getElementById("employeeProfileMeta").textContent = employee.email + " · " + employeeRoleLabel(employee.role) + (employee.assignedManager ? " · закреплён за " + employee.assignedManager : "") + " · " + employeeContractLabel(employee);
         var accessLabel = employee.accessStatus === "connected" ? "Кабинет подключён" : employee.accessStatus === "invited" ? "Ожидает регистрации" : "Доступ не создан";
         document.getElementById("employeeProfileBadges").innerHTML = '<span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span><span class="badge ' + (employee.status === "active" ? "badge-green" : "badge-red") + '">' + (employee.status === "active" ? "Активен" : "Приостановлен") + '</span><span class="badge ' + (employee.accessStatus === "connected" ? "badge-green" : "badge-amber") + '">' + accessLabel + '</span>';
         var month = activeMonthKey();
@@ -2649,7 +2767,9 @@
         document.getElementById("employeeRole").value = item.role || "assistant";
         document.getElementById("employeeStatus").value = item.status || "active";
         document.getElementById("employeeAssignedManager").value = activeEmployeeManagers().indexOf(item.assignedManager) >= 0 ? item.assignedManager : (activeEmployeeManagers()[0] || "");
-        document.getElementById("employeeBaseSalary").value = Number(item.baseSalary || 0);
+        var salaryProfile = effectiveEmployeeSalaryProfile(item);
+        document.getElementById("employeeBaseSalary").value = Number(salaryProfile.baseSalary || 0);
+        document.getElementById("employeeContractDate").value = salaryProfile.contractDate || "";
         document.getElementById("employeeHistoryAliases").value = (item.historyAliases || []).join(", ");
         document.getElementById("removeEmployeeBtn").classList.toggle("hidden",!employee || employee.role === "leader" || employee.status === "paused");
         document.getElementById("employeeFormNote").textContent = employee ? "Изменения сохранятся в общей базе и обновят доступ сотрудника." : "После сохранения появится новый кабинет сотрудника.";
@@ -2673,10 +2793,8 @@
         if (previous) migrateEmployeeReferences(previous,saved);
         var index = employees.findIndex(function (item) { return item.id === saved.id; });
         if (index >= 0) employees[index] = saved; else employees.push(saved);
-        if (saved.role === "manager") {
-          ensureManagerMetrics(saved.name);
-          salarySetting(saved.name).base = Number(saved.baseSalary || 0);
-        }
+        if (saved.role === "manager") ensureManagerMetrics(saved.name);
+        if (saved.role === "manager" || saved.role === "assistant") salarySetting(saved.name).base = effectiveEmployeeBaseSalary(saved);
         cacheEmployees();
         sessionStorage.setItem("nslManagerMetrics",JSON.stringify(managerMetrics));
         sessionStorage.setItem("nslSalarySettings",JSON.stringify(salarySettings));
@@ -2694,11 +2812,14 @@
         var manualReachKpi = Math.max(0,Number(document.getElementById("kpiManualReachAmount").value || 0));
         var base = Number(document.getElementById("kpiBaseSalary").value || 0);
         var sanctions = Number(document.getElementById("kpiSanctions").value || 0);
-        var bloggerKpi = a*KPI_RULES.categories.a.amount + b*KPI_RULES.categories.b.amount + c*KPI_RULES.categories.c.amount;
+        var bloggerKpi = a*salaryBloggerAmount("manager","a") + b*salaryBloggerAmount("manager","b") + c*salaryBloggerAmount("manager","c");
         var reachKpi = manualReachKpi;
         var totalKpi = Math.max(0,bloggerKpi + reachKpi - sanctions);
+        var manager = document.getElementById("kpiManagerSelect").value;
+        var month = document.getElementById("kpiMonthSelect").value;
+        var planReach = manager && month ? Number(monthlyPlanSetting(manager,month).reach || KPI_RULES.planReach || 0) : Number(KPI_RULES.planReach || 0);
         document.getElementById("kpiBloggersAmount").textContent = money(bloggerKpi);
-        document.getElementById("kpiReachPercent").textContent = percent(factReach/KPI_RULES.planReach*100,1);
+        document.getElementById("kpiReachPercent").textContent = planReach > 0 ? percent(factReach/planReach*100,1) : "План не задан";
         document.getElementById("kpiReachAmount").textContent = money(reachKpi);
         document.getElementById("kpiTotalAmount").textContent = money(totalKpi);
         document.getElementById("kpiSalaryAmount").textContent = money(base + totalKpi);
@@ -4353,6 +4474,7 @@
           var previous = Object.assign({},employee);
           var updated = Object.assign({},employee,{baseSalary:value});
           persistEmployee(updated).then(function (saved) {
+            saveEmployeeSalaryProfile(saved,value,effectiveEmployeeSalaryProfile(employee).contractDate);
             applySavedEmployee(saved,previous);
             showToast("Оклад сохранён в карточке сотрудника");
           }).catch(function () { renderSalaryTable(); showToast("Не удалось сохранить оклад"); });
@@ -4361,7 +4483,8 @@
           var month = input.dataset.salaryMonth || document.getElementById("salaryMonthFilter").value;
           var setting = salarySetting(manager);
           var nextSanctions = input.dataset.salaryField === "sanctions" ? value : Number(setting.sanctions[month] || 0);
-          var currentSalary = calculateManagerSalary(manager,month);
+          var salaryEmployee = employeeByName(manager);
+          var currentSalary = calculateEmployeeSalary(salaryEmployee,month);
           var nextReachKpi = input.dataset.salaryField === "reachKpi" ? value : currentSalary.reachKpi;
           persistKpiAdjustment(manager,month,nextSanctions,nextReachKpi).then(function (adjustment) {
             var savedSetting = salarySetting(adjustment.manager);
@@ -4592,6 +4715,7 @@
           id:id || "employee-" + Date.now(),name:name,email:email,role:document.getElementById("employeeRole").value,
           assignedManager:document.getElementById("employeeRole").value === "assistant" ? document.getElementById("employeeAssignedManager").value : "",
           status:document.getElementById("employeeStatus").value,baseSalary:Math.max(0,Number(document.getElementById("employeeBaseSalary").value || 0)),
+          contractDate:document.getElementById("employeeContractDate").value || "",
           historyAliases:document.getElementById("employeeHistoryAliases").value.split(",").map(function (value) { return value.trim(); }).filter(Boolean)
         };
         if (previous && previous.name !== name && employee.historyAliases.indexOf(previous.name) < 0) employee.historyAliases.push(previous.name);
@@ -4599,6 +4723,7 @@
         button.disabled = true;
         document.getElementById("employeeFormNote").textContent = "Сохраняю изменения в общей базе…";
         persistEmployee(employee).then(function (saved) {
+          saveEmployeeSalaryProfile(saved,employee.baseSalary,employee.contractDate);
           applySavedEmployee(saved,previous);
           closeLayers();
           showToast(previous ? "Сотрудник обновлён" : "Сотрудник добавлен");
@@ -4692,6 +4817,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=90",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=91",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

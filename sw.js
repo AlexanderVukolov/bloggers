@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v90-metric-reconciliation";
+const CACHE_NAME = "nsl-bloggers-github-v91-salary-policy";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,

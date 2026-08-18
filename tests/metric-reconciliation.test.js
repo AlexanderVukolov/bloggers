@@ -147,3 +147,104 @@ test("assistant outreach in leader profile uses fact field",() => {
   assert.equal(activity.outreach,300);
   assert.equal(activity.approvals,3);
 });
+
+const salaryRules = {
+  categories:{a:{min:1000,max:3000},b:{min:3000,max:5000},c:{min:5000,max:null}},
+  bloggerAmounts:{manager:{a:500,b:2700,c:5000},assistant:{a:250,b:1350,c:2500}},
+  managerReachPercentTiers:[
+    {min:100,amount:20000},
+    {min:90,amount:15000},
+    {min:80,amount:10000},
+    {min:70,amount:6000},
+  ],
+};
+
+test("salary policy finds the four employees regardless of name order",() => {
+  const context = {
+    Object,Number,String,Math,
+    SALARY_PROFILES:[
+      {firstName:"Оксана",lastName:"Пичушкина",role:"manager",baseSalary:35000,contractDate:"2026-02-21"},
+      {firstName:"Евгения",lastName:"Оржел",role:"manager",baseSalary:40000,contractDate:"2026-02-24"},
+      {firstName:"Ольга",lastName:"Петухова",role:"manager",baseSalary:30000,contractDate:"2026-08-12"},
+      {firstName:"Юлия",lastName:"Сударинова",role:"assistant",baseSalary:15000,contractDate:"2026-06-22"},
+    ],
+  };
+  ["normalizedSalaryNameTokens","salaryProfileForName"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  assert.equal(context.salaryProfileForName("Пичушкина Оксана Анатольевна").baseSalary,35000);
+  assert.equal(context.salaryProfileForName("Евгения Александровна Оржел").baseSalary,40000);
+  assert.equal(context.salaryProfileForName("Петухова Ольга Владимировна").contractDate,"2026-08-12");
+  assert.equal(context.salaryProfileForName("Сударинова Юлия Айваровна").role,"assistant");
+});
+
+test("blogger KPI boundaries use B from 3000 and C from 5000",() => {
+  const context = {Object,Number,String,Math,SALARY_RULES:salaryRules};
+  ["salaryBloggerCategory","salaryBloggerAmount","reachKpiAmount"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  assert.equal(context.salaryBloggerCategory(999),"");
+  assert.equal(context.salaryBloggerCategory(1000),"a");
+  assert.equal(context.salaryBloggerCategory(2999),"a");
+  assert.equal(context.salaryBloggerCategory(3000),"b");
+  assert.equal(context.salaryBloggerCategory(4999),"b");
+  assert.equal(context.salaryBloggerCategory(5000),"c");
+  assert.equal(context.salaryBloggerAmount("manager","b"),2700);
+  assert.equal(context.salaryBloggerAmount("assistant","b"),1350);
+  assert.equal(context.reachKpiAmount(69.99),0);
+  assert.equal(context.reachKpiAmount(70),6000);
+  assert.equal(context.reachKpiAmount(80),10000);
+  assert.equal(context.reachKpiAmount(90),15000);
+  assert.equal(context.reachKpiAmount(100),20000);
+});
+
+test("assistant salary automatically counts only bloggers assigned to the assistant",() => {
+  const setting = {base:0,sanctions:{"2026-08":100},manualReachKpi:{}};
+  const context = {
+    Object,Number,String,Math,SALARY_RULES:salaryRules,
+    resolvedKpiMonthBloggers:() => [
+      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:1000},
+      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:3000},
+      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:5000},
+      {assistant:"Другой ассистент",manager:"Оксана Пичушкина",factReach:9000},
+    ],
+    employeeNameMatches:(expected,actual) => expected === actual,
+    salarySetting:() => setting,
+    employeeByName:() => ({name:"Юлия Сударинова",baseSalary:15000}),
+    effectiveEmployeeBaseSalary:() => 15000,
+  };
+  ["salaryBloggerCategory","salaryBloggerAmount","bloggerKpiForEmployee","calculateAssistantSalary"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  const result = context.calculateAssistantSalary("Юлия Сударинова","2026-08");
+  assert.deepEqual([result.a,result.b,result.c],[1,1,1]);
+  assert.equal(result.bloggerKpi,4100);
+  assert.equal(result.totalKpi,4000);
+  assert.equal(result.salary,19000);
+});
+
+test("manager reach KPI uses the individual monthly reach plan",() => {
+  const context = {
+    Object,Number,String,Math,SALARY_RULES:salaryRules,KPI_RULES:{planReach:999999},MAX_REACH_PER_FORMAT:100000000,
+    kpiRowsForManager:() => [{actual:8000}],
+    synchronizedPlacementRecords:() => [{manager:"Оксана Пичушкина",sortDate:"2026-08-10",actual:8000}],
+    employeeNameMatches:(expected,actual) => expected === actual,
+    kpiEvidenceForPlacement:() => false,
+    bloggerKpiForEmployee:() => ({a:1,b:0,c:0,amount:500,confirmed:1,records:1}),
+    salarySetting:() => ({base:0,sanctions:{},manualReachKpi:{}}),
+    employeeByName:() => ({name:"Оксана Пичушкина",baseSalary:35000}),
+    effectiveEmployeeBaseSalary:() => 35000,
+    monthlyPlanSetting:() => ({reach:10000}),
+  };
+  ["reachKpiAmount","calculateManagerSalary"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  const result = context.calculateManagerSalary("Оксана Пичушкина","2026-08");
+  assert.equal(result.reachPct,80);
+  assert.equal(result.autoReachKpi,10000);
+  assert.equal(result.salary,45500);
+});
