@@ -15,6 +15,19 @@
     if (input) input.min = "0";
   });
 
+  var outreachGrid = document.getElementById("dashboardOutreachKpis");
+  if (outreachGrid) outreachGrid.insertAdjacentHTML("beforebegin", '<div class="card card-pad leader-only" id="departmentOutreachPlanEditor" style="margin-bottom:12px"><div class="card-title"><div><h3>План рассылок отдела</h3><p>Администратор вручную задаёт план на выбранный день и на весь месяц</p></div><span class="badge badge-blue" id="departmentOutreachPlanMonth">Текущий месяц</span></div><div class="form-grid"><div class="field"><label>План на день</label><input class="input" id="departmentOutreachDayPlan" type="number" min="0" step="1" value="0"></div><div class="field"><label>План на месяц</label><input class="input" id="departmentOutreachMonthPlan" type="number" min="0" step="1" value="0"></div></div><p class="evidence-note">План хранится отдельно от факта. Факт всегда складывается только из сохранённых дневных отчётов менеджеров и ассистентов.</p></div>');
+
+  var bloggerImportStrip = document.getElementById("bloggerImportMeta");
+  if (bloggerImportStrip) bloggerImportStrip.closest(".import-strip").insertAdjacentHTML("afterend", '<article class="card card-pad leader-only" id="newBloggersMonthSection" style="margin-top:12px"><div class="card-title"><div><h3>Новые блогеры месяца</h3><p>Список формируется по дате добавления карточки, а не по дате выхода</p></div><span class="badge badge-green" id="newBloggersMonthCount">0</span></div><div class="table-wrap"><table style="min-width:880px"><thead><tr><th>Блогер</th><th>Ссылка</th><th>Статус</th><th>Направление</th><th>Ответственный</th><th>Добавил</th><th>Дата добавления</th></tr></thead><tbody id="newBloggersMonthTable"></tbody></table></div></article>');
+
+  var kpiCalculatorView = document.getElementById("regulation-view-calculator");
+  if (kpiCalculatorView) {
+    kpiCalculatorView.insertAdjacentHTML("afterbegin", '<article class="card card-pad" id="kpiReachPlanSection" style="margin-bottom:16px"><div class="card-title"><div><h3>План по охвату</h3><p>Отдельный план и факт охвата по каждому менеджеру</p></div><span class="badge badge-blue" id="kpiReachPlanMonth">Текущий месяц</span></div><div class="table-wrap"><table style="min-width:760px"><thead><tr><th>Менеджер</th><th>План охвата</th><th>Подтверждённый факт</th><th>Выполнение</th></tr></thead><tbody id="kpiReachPlanTable"></tbody></table></div></article>');
+    var rosterHeading = document.getElementById("kpiBloggerRosterTable").closest("article").querySelector(".card-title div");
+    if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI новых блогеров</h3><p>Все карточки, добавленные менеджером или ассистентом в выбранном месяце, попадают в список автоматически. Администратор может уточнить охват и ответственного.</p>';
+  }
+
 })();
 /*__IMPORTED_DATA__*/
     /*__EUGENIA_STATS__*/
@@ -266,9 +279,10 @@
           var item = assistantOutreachSummary(name,month,latestDate);
           total.plan += Number(item.monthPlan || 0); total.fact += Number(item.monthFact || 0); return total;
         },{plan:0,fact:0});
-        var plan = managerTotal.plan + assistantTotal.plan;
+        var departmentPlan = monthlyDepartmentPlanSetting(month);
+        var plan = Math.max(0,Number(departmentPlan.outreachMonth || 0));
         var fact = managerTotal.fact + assistantTotal.fact;
-        return {plan:plan,fact:fact,progress:plan > 0 ? fact / plan * 100 : null,source:"Ежедневные отчёты сотрудников"};
+        return {plan:plan,fact:fact,progress:plan > 0 ? fact / plan * 100 : null,source:"Ручной план администратора · факт из дневных отчётов"};
       }
       function programDirectionCostMetric(month,direction) {
         var fact = synchronizedPlacementRecords().filter(function (item) {
@@ -289,12 +303,47 @@
           var fitCost = programDirectionCostMetric(entry.month,"FIT PRO");
           var lnFact = monthlyDirectionFact(entry.month,"ЛН");
           var fitFact = monthlyDirectionFact(entry.month,"FIT PRO");
-          if (directions.ln) { directions.ln.metrics.outreach = {plan:null,fact:null,progress:null}; directions.ln.metrics.costs = lnCost; directions.ln.metrics.clicks = {plan:null,fact:Number(lnFact.clicks || 0),progress:null,source:"Карточки и подтверждённые отчёты"}; }
-          if (directions.fit) { directions.fit.metrics.outreach = {plan:null,fact:null,progress:null}; directions.fit.metrics.costs = fitCost; directions.fit.metrics.clicks = {plan:null,fact:Number(fitFact.clicks || 0),progress:null,source:"Карточки и подтверждённые отчёты"}; }
+          function metricFact(metrics,id) {
+            var value = metrics && metrics[id] && metrics[id].fact;
+            return value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+          }
+          function setMetricFact(metrics,id,value,source) {
+            var previous = metrics[id] || {};
+            var plan = previous.plan == null ? null : Number(previous.plan);
+            metrics[id] = {plan:plan,fact:value,progress:plan > 0 && value != null ? value / plan * 100 : null,source:source};
+          }
+          function recalculateEfficiency(metrics) {
+            var revenue = metricFact(metrics,"revenue");
+            var costs = metricFact(metrics,"costs");
+            var paidBudget = metricFact(metrics,"paidBudget");
+            setMetricFact(metrics,"roi",costs > 0 && revenue != null ? (revenue - costs) / costs * 100 : null,"Выручка и общие затраты");
+            var marketingCosts = paidBudget > 0 ? paidBudget : costs;
+            setMetricFact(metrics,"romi",marketingCosts > 0 && revenue != null ? (revenue - marketingCosts) / marketingCosts * 100 : null,"Выручка и маркетинговые затраты");
+          }
+          function attachDirection(directionEntry,fact,costFallback) {
+            if (!directionEntry) return;
+            var metrics = directionEntry.metrics || (directionEntry.metrics = {});
+            metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
+            setMetricFact(metrics,"exits",Number(fact.exits || 0),"Главная · единый реестр выходов");
+            setMetricFact(metrics,"clicks",Number(fact.clicks || 0),"Выходы и подтверждённые отчёты");
+            if (metricFact(metrics,"costs") == null) setMetricFact(metrics,"costs",Number(costFallback.fact || 0),"Размещения · резервный источник");
+            recalculateEfficiency(metrics);
+          }
+          attachDirection(directions.ln,lnFact,lnCost);
+          attachDirection(directions.fit,fitFact,fitCost);
           if (entry.combined) {
+            var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
             entry.combined.metrics.outreach = programOutreachMetric(entry.month);
-            entry.combined.metrics.clicks = {plan:null,fact:Number(lnFact.clicks || 0) + Number(fitFact.clicks || 0),progress:null,source:"Карточки и подтверждённые отчёты"};
-            entry.combined.metrics.costs = {plan:null,fact:Number(lnCost.fact || 0) + Number(fitCost.fact || 0),progress:null,source:"Размещения и карточки блогеров"};
+            setMetricFact(combinedMetrics,"exits",Number(lnFact.exits || 0) + Number(fitFact.exits || 0),"Главная · ЛН + FIT PRO");
+            setMetricFact(combinedMetrics,"clicks",Number(lnFact.clicks || 0) + Number(fitFact.clicks || 0),"Выходы и подтверждённые отчёты");
+            var directionCosts = [directions.ln,directions.fit].reduce(function (sum,item) {
+              var value = metricFact(item && item.metrics,"costs");
+              if (value != null) { sum.value += value; sum.found = true; }
+              return sum;
+            },{value:0,found:false});
+            if (directionCosts.found) setMetricFact(combinedMetrics,"costs",directionCosts.value,"Финансовая таблица · ЛН + FIT PRO");
+            else if (metricFact(combinedMetrics,"costs") == null) setMetricFact(combinedMetrics,"costs",Number(lnCost.fact || 0) + Number(fitCost.fact || 0),"Размещения · резервный источник");
+            recalculateEfficiency(combinedMetrics);
           }
         });
         return data;
@@ -844,63 +893,116 @@
         }
         return monthlyManagerPlans[month][manager];
       }
-      function monthlyManagerFact(manager,month) {
-        var releasedPlacements = synchronizedPlacementRecords().filter(function (item) {
-          return employeeNameMatches(manager,item.manager) && (monthFromDateValue(item.sortDate) || monthFromDateValue(item.start)) === month && placementCountsAsExit(item);
-        });
-        var placementKeys = {};
-        releasedPlacements.forEach(function (item) { placementKeys[(item.sourceKey || item.tag || "") + "|" + (item.sortDate || item.start || "")] = true; });
-        var validReels = reelRecords.filter(function (item) {
-          var actual = Number(item.reelsReach || 0) + Number(item.carouselReach || 0);
-          var key = (item.sourceKey || item.tag || "") + "|" + (item.sortDate || item.date || "");
-          return employeeNameMatches(manager,item.manager) && (monthFromDateValue(item.sortDate) || monthFromDateValue(item.date)) === month && actual > 0 && actual <= MAX_REACH_PER_FORMAT && !placementKeys[key];
-        });
-        var placementDates = {};
-        var combined = releasedPlacements.reduce(function (total,item) {
-          if (item.sortDate) placementDates[item.sortDate] = true;
-          total.exits += 1;
-          total.guaranteed += Number(item.guaranteed || 0);
-          total.reach += Number(effectivePlacementActual(item) || 0);
-          total.revenue += Number(item.revenue || 0);
-          return total;
-        },{exits:0,guaranteed:0,reach:0,revenue:0,dailyDays:0});
-        validReels.forEach(function (item) {
-          if (item.sortDate) placementDates[item.sortDate] = true;
-          combined.exits += 1;
-          combined.guaranteed += Number(item.guaranteed || 0);
-          combined.reach += Number(item.reelsReach || 0) + Number(item.carouselReach || 0);
-          combined.revenue += Number(item.revenue || 0);
-        });
-        Object.keys(dailyManagerReports).filter(function (date) { return date.slice(0,7) === month && !placementDates[date] && !releasedPlacements.length && !validReels.length; }).forEach(function (date) {
-          var manual = employeeNamedRecord(dailyManagerReports[date] || {},manager);
-          if (!manual) return;
-          var item = autoManagerDailyMetrics(manager,date,manual);
-          combined.exits += Number(item.exitsLn || 0) + Number(item.exitsFit || 0);
-          combined.guaranteed += Number(item.planReachLn || 0) + Number(item.planReachFit || 0);
-          combined.reach += Number(item.factReachLn || 0) + Number(item.factReachFit || 0);
-          combined.revenue += Number(item.revenueLn || 0) + Number(item.revenueFit || 0);
-          combined.dailyDays += 1;
-        });
-        if (releasedPlacements.length || validReels.length || combined.dailyDays) {
-          return {
-            exits:combined.exits,
-            guaranteed:combined.guaranteed,
-            reach:combined.reach,
-            revenue:combined.revenue,
-            source:releasedPlacements.length && validReels.length ? "Единый реестр + Reels/карусели" : releasedPlacements.length ? "Единый реестр" : validReels.length ? "Reels/карусели" : "Ежедневная сводка"
-          };
+      function canonicalMonthlyExitFact(month,options) {
+        options = options || {};
+        var groups = {};
+        var evidenceIncluded = false;
+        function rowMatches(direction,manager) {
+          if (options.direction && direction !== options.direction) return false;
+          if (options.manager && !employeeNameMatches(options.manager,manager)) return false;
+          return true;
         }
-        var releasedBloggers = bloggers.filter(function (item) {
-          return employeeNameMatches(manager,item.manager) && item.status === "Вышел" && (monthFromDateValue(item.last) || monthFromDateValue(item.sortDate)) === month;
+        function ensureGroup(identity,date,direction,manager) {
+          var key = identity + "|" + date;
+          if (!groups[key]) groups[key] = {key:key,identity:identity,date:date,direction:direction,manager:manager,guaranteed:0,formatReach:{},clicks:0,leads:0,sales:0,revenue:0,formatCosts:{},hasPlacement:false,hasEvidence:false};
+          return groups[key];
+        }
+        synchronizedPlacementRecords().forEach(function (item) {
+          var date = placementIsoDate(item) || String(item.sortDate || item.start || "");
+          if (monthFromDateValue(date) !== month || !placementCountsAsExit(item)) return;
+          var direction = placementDirection(item);
+          if (!rowMatches(direction,item.manager)) return;
+          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id || "");
+          if (!identity || !date) return;
+          var group = ensureGroup(identity,date,direction,item.manager);
+          var format = String(item.type || item.format || "Основной формат").trim().toLowerCase();
+          var reach = Math.max(0,Number(effectivePlacementActual(item) || 0));
+          var cost = Math.max(0,Number(item.cost || 0));
+          group.hasPlacement = true;
+          group.guaranteed = Math.max(group.guaranteed,Math.max(0,Number(item.guaranteed || 0)));
+          group.formatReach[format] = Math.max(Number(group.formatReach[format] || 0),reach);
+          group.formatCosts[format] = Math.max(Number(group.formatCosts[format] || 0),cost);
+          group.clicks = Math.max(group.clicks,Math.max(0,Number(effectivePlacementClicks(item) || 0)));
+          group.leads = Math.max(group.leads,Math.max(0,Number(item.leads || 0)));
+          group.sales = Math.max(group.sales,Math.max(0,Number(item.sales || 0)));
+          group.revenue = Math.max(group.revenue,Math.max(0,Number(item.revenue || 0)));
         });
-        var reachAnomalies = releasedBloggers.filter(function (item) { var value = Number(item.reach); return !Number.isFinite(value) || value < 0 || value > MAX_BLOGGER_REACH; }).length;
-        return {
-          exits:releasedBloggers.length,
-          guaranteed:0,
-          reach:releasedBloggers.reduce(function (sum,item) { var value = Number(item.reach); return sum + (Number.isFinite(value) && value >= 0 && value <= MAX_BLOGGER_REACH ? value : 0); },0),
-          revenue:releasedBloggers.reduce(function (sum,item) { return sum + Number(item.revenue || 0); },0),
-          source:"Карточки блогеров" + (reachAnomalies ? " · исключено аномалий: " + reachAnomalies : "")
-        };
+        reelRecords.forEach(function (item) {
+          var date = String(item.sortDate || item.date || "");
+          var actual = Math.max(0,Number(item.reelsReach || 0)) + Math.max(0,Number(item.carouselReach || 0));
+          if (monthFromDateValue(date) !== month || actual <= 0 || actual > MAX_REACH_PER_FORMAT) return;
+          var blogger = linkedBloggerForPlacement(item);
+          var direction = item.direction || item.brand || (blogger && blogger.brand) || "ЛН";
+          var manager = item.manager || (blogger && blogger.manager) || "";
+          if (!rowMatches(direction,manager)) return;
+          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id || "");
+          if (!identity || groups[identity + "|" + date]) return;
+          var group = ensureGroup(identity,date,direction,manager);
+          group.hasPlacement = true;
+          group.guaranteed = Math.max(0,Number(item.guaranteed || 0));
+          group.formatReach["reels / карусель"] = actual;
+          group.clicks = Math.max(0,Number(item.clicks || 0));
+          group.leads = Math.max(0,Number(item.leads || 0));
+          group.sales = Math.max(0,Number(item.sales || 0));
+          group.revenue = Math.max(0,Number(item.revenue || 0));
+        });
+        evidenceReports.forEach(function (report) {
+          var date = String(report.date || "");
+          var reach = Number(report.reach || 0);
+          if (monthFromDateValue(date) !== month || reach <= 0 || reach > MAX_BLOGGER_REACH || (report.status && report.status !== "Подтверждено")) return;
+          var identity = normalizeBloggerIdentity(report.blogger);
+          if (!identity) return;
+          var existing = groups[identity + "|" + date];
+          var matches = ensureBloggerLookupIndex().byIdentity[identity] || [];
+          var blogger = matches[0] || null;
+          var direction = existing && existing.direction || (blogger && blogger.brand) || "";
+          var manager = existing && existing.manager || (blogger && blogger.manager) || report.employee || "";
+          if (!direction || !rowMatches(direction,manager)) return;
+          var group = existing || ensureGroup(identity,date,direction,manager);
+          group.hasEvidence = true;
+          group.evidenceReach = Math.max(Number(group.evidenceReach || 0),reach);
+          group.clicks = Math.max(group.clicks,Math.max(0,Number(report.clicks || 0)));
+          evidenceIncluded = true;
+        });
+        var result = Object.keys(groups).reduce(function (total,key) {
+          var group = groups[key];
+          var placementReach = Object.keys(group.formatReach).reduce(function (sum,format) { return sum + Number(group.formatReach[format] || 0); },0);
+          var costs = Object.keys(group.formatCosts).reduce(function (sum,format) { return sum + Number(group.formatCosts[format] || 0); },0);
+          total.exits += 1;
+          total.guaranteed += group.guaranteed;
+          total.reach += Math.max(placementReach,Number(group.evidenceReach || 0));
+          total.clicks += group.clicks;
+          total.leads += group.leads;
+          total.sales += group.sales;
+          total.revenue += group.revenue;
+          total.costs += costs;
+          total.bloggerKeys[group.identity] = true;
+          return total;
+        },{direction:options.direction || "Все",exits:0,guaranteed:0,reach:0,clicks:0,leads:0,sales:0,revenue:0,costs:0,bloggerKeys:{}});
+        if (!result.exits) {
+          bloggers.filter(function (item) {
+            var dateMonth = monthFromDateValue(item.last) || monthFromDateValue(item.sortDate);
+            return item.status === "Вышел" && dateMonth === month && rowMatches(item.brand,item.manager);
+          }).forEach(function (item) {
+            var identity = normalizeBloggerIdentity(item.sourceKey || item.link || item.name || item.display) || String(item.id || "");
+            if (result.bloggerKeys[identity]) return;
+            result.bloggerKeys[identity] = true;
+            result.exits += 1;
+            result.reach += Math.max(0,Number(item.reach || 0));
+            result.clicks += Math.max(0,Number(item.clicks || 0));
+            result.leads += Math.max(0,Number(item.leads || 0));
+            result.sales += Math.max(0,Number(item.sales || 0));
+            result.revenue += Math.max(0,Number(item.revenue || 0));
+            result.costs += Math.max(0,Number(item.spent || 0));
+          });
+          result.source = "Карточки блогеров";
+        } else result.source = evidenceIncluded ? "Уникальные выходы и подтверждённые отчёты" : "Уникальные выходы";
+        result.bloggers = Object.keys(result.bloggerKeys).length;
+        delete result.bloggerKeys;
+        return result;
+      }
+      function monthlyManagerFact(manager,month) {
+        return canonicalMonthlyExitFact(month,{manager:manager});
       }
       function monthlyPlanInput(manager,month,field,value) {
         if (role !== "leader") return '<b>' + (field === "revenue" ? money(value) : number(value)) + '</b>';
@@ -922,6 +1024,20 @@
           totals.planRevenue += Number(plan.revenue || 0); totals.factRevenue += fact.revenue;
           return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(manager) + '</div><div><strong>' + safeText(manager) + '</strong><small>План на месяц</small></div></div></td><td>' + monthlyPlanInput(manager,month,"exits",plan.exits) + '</td><td><b>' + number(fact.exits) + '</b></td><td><span class="' + metricState(exitsPct,100) + '">' + percent(exitsPct,1) + '</span></td><td>' + monthlyPlanInput(manager,month,"reach",plan.reach) + '</td><td><b>' + number(fact.guaranteed) + '</b></td><td><b>' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + monthlyPlanInput(manager,month,"revenue",plan.revenue) + '</td><td><b>' + money(fact.revenue) + '</b></td><td><span class="' + metricState(revenuePct,100) + '">' + percent(revenuePct,1) + '</span></td><td><span class="badge badge-blue">' + fact.source + '</span></td></tr>';
         });
+        var departmentFacts = filter === "all" ? [monthlyDirectionFact(month,"ЛН"),monthlyDirectionFact(month,"FIT PRO")] : managers.map(function (manager) { return monthlyManagerFact(manager,month); });
+        if (filter === "all") departmentFacts.forEach(function (item) { applyOfficialDirectionMetrics(item,month); });
+        var departmentFact = departmentFacts.reduce(function (sum,item) {
+          sum.exits += Number(item.exits || 0);
+          sum.guaranteed += Number(item.guaranteed || 0);
+          sum.reach += Number(item.reach || 0);
+          sum.revenue += Number(item.revenue || 0);
+          return sum;
+        },{exits:0,guaranteed:0,reach:0,revenue:0});
+        totals.factExits = departmentFact.exits;
+        totals.guaranteedReach = departmentFact.guaranteed;
+        totals.factReach = departmentFact.reach;
+        totals.factRevenue = departmentFact.revenue;
+        rows.push('<tr class="manager-total"><td><div class="blogger-cell"><div class="mini-avatar">Σ</div><div><strong>' + (filter === "all" ? 'Итого отдела' : 'Итого по фильтру') + '</strong><small>' + (filter === "all" ? 'ЛН + FIT PRO · без дублей' : 'Только выбранный сотрудник') + '</small></div></div></td><td><b>' + number(totals.planExits) + '</b></td><td><b>' + number(totals.factExits) + '</b></td><td><span class="' + metricState(rate(totals.factExits,totals.planExits),100) + '">' + percent(rate(totals.factExits,totals.planExits),1) + '</span></td><td><b>' + number(totals.planReach) + '</b></td><td><b>' + number(totals.guaranteedReach) + '</b></td><td><b>' + number(totals.factReach) + '</b></td><td><span class="' + metricState(rate(totals.factReach,totals.planReach),100) + '">' + percent(rate(totals.factReach,totals.planReach),1) + '</span></td><td><b>' + money(totals.planRevenue) + '</b></td><td><b>' + money(totals.factRevenue) + '</b></td><td><span class="' + metricState(rate(totals.factRevenue,totals.planRevenue),100) + '">' + percent(rate(totals.factRevenue,totals.planRevenue),1) + '</span></td><td><span class="badge badge-green">Единая сводка</span></td></tr>');
         document.getElementById("managerMonthlyPlanTable").innerHTML = rows.join("");
         var exitsPct = rate(totals.factExits,totals.planExits);
         var reachPct = rate(totals.factReach,totals.planReach);
@@ -1074,6 +1190,44 @@
         var value = monthPlans.__department__ || monthPlans["План отдела"] || {};
         return value && typeof value === "object" ? value : {};
       }
+      function financeEntryForMonth(month) {
+        if (!currentFinanceData) return null;
+        var entries = (currentFinanceData.archive || []).concat(currentFinanceData.current ? [currentFinanceData.current] : []);
+        return entries.find(function (entry) { return entry && entry.month === month; }) || null;
+      }
+      function officialDirectionMetric(month,direction,id) {
+        var entry = financeEntryForMonth(month);
+        var key = direction === "FIT PRO" ? "fit" : "ln";
+        var metric = entry && entry.directions && entry.directions[key] && entry.directions[key].metrics && entry.directions[key].metrics[id];
+        var value = metric && metric.fact;
+        return value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+      }
+      function applyOfficialDirectionMetrics(item,month) {
+        var fields = ["leads","sales","revenue"];
+        var applied = [];
+        fields.forEach(function (field) {
+          var value = officialDirectionMetric(month,item.direction,field);
+          if (value == null && field === "revenue") {
+            var departmentPlan = monthlyDepartmentPlanSetting(month);
+            var fallback = item.direction === "FIT PRO" ? departmentPlan.revenueFitFact : departmentPlan.revenueLnFact;
+            if (fallback != null && fallback !== "" && Number.isFinite(Number(fallback))) value = Number(fallback);
+          }
+          if (value == null || value < 0) return;
+          item[field] = value;
+          applied.push(field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
+        });
+        if (applied.length) item.source = String(item.source || "Выходы") + " · Google Sheets: " + applied.join(", ");
+        return item;
+      }
+      function renderDepartmentOutreachPlanEditor(month) {
+        var plan = monthlyDepartmentPlanSetting(month);
+        var dayInput = document.getElementById("departmentOutreachDayPlan");
+        var monthInput = document.getElementById("departmentOutreachMonthPlan");
+        if (!dayInput || !monthInput) return;
+        dayInput.value = Object.prototype.hasOwnProperty.call(plan,"outreachDay") ? Math.max(0,Number(plan.outreachDay || 0)) : 0;
+        monthInput.value = Object.prototype.hasOwnProperty.call(plan,"outreachMonth") ? Math.max(0,Number(plan.outreachMonth || 0)) : 0;
+        document.getElementById("departmentOutreachPlanMonth").textContent = activeMonthLabel(month);
+      }
       function monthlyExitGuarantee(month,direction) {
         var placementsById = {};
         synchronizedPlacementRecords().forEach(function (item) {
@@ -1111,107 +1265,7 @@
         return Object.keys(importedBundles).reduce(function (sum,key) { return sum + importedBundles[key].value; },total);
       }
       function monthlyDirectionFact(month,direction) {
-        var placementKeys = {};
-        var placementReachByKey = {};
-        var placementClicksByKey = {};
-        var bloggerKeys = {};
-        var rows = synchronizedPlacementRecords().filter(function (item) {
-          var itemDirection = placementDirection(item);
-          var inMonth = (monthFromDateValue(item.sortDate) || monthFromDateValue(item.start)) === month;
-          return itemDirection === direction && inMonth && placementCountsAsExit(item);
-        });
-        var result = rows.reduce(function (total,item) {
-          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id);
-          var date = placementIsoDate(item) || item.sortDate || item.start || "";
-          var placementKey = identity + "|" + date;
-          var actual = Number(effectivePlacementActual(item) || 0);
-          var clicks = Number(effectivePlacementClicks(item) || 0);
-          placementKeys[placementKey] = true;
-          placementReachByKey[placementKey] = Number(placementReachByKey[placementKey] || 0) + actual;
-          placementClicksByKey[placementKey] = Math.max(Number(placementClicksByKey[placementKey] || 0),clicks);
-          bloggerKeys[identity] = true;
-          total.exits += 1;
-          total.guaranteed += Number(item.guaranteed || 0);
-          total.reach += actual;
-          total.clicks += clicks;
-          total.leads += Number(item.leads || 0);
-          total.sales += Number(item.sales || 0);
-          total.revenue += Number(item.revenue || 0);
-          total.costs += Number(item.cost || 0);
-          return total;
-        },{direction:direction,exits:0,guaranteed:0,reach:0,clicks:0,leads:0,sales:0,revenue:0,costs:0,bloggers:0,source:"Единый реестр"});
-        reelRecords.forEach(function (item) {
-          var blogger = linkedBloggerForPlacement(item);
-          var itemDirection = item.direction || item.brand || (blogger && blogger.brand) || "ЛН";
-          var actual = Number(item.reelsReach || 0) + Number(item.carouselReach || 0);
-          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id);
-          var date = item.sortDate || item.date || "";
-          var placementKey = identity + "|" + date;
-          if (itemDirection !== direction || monthFromDateValue(date) !== month || actual <= 0 || actual > MAX_REACH_PER_FORMAT || placementKeys[placementKey]) return;
-          placementKeys[placementKey] = true;
-          placementReachByKey[placementKey] = actual;
-          bloggerKeys[identity] = true;
-          result.exits += 1;
-          result.guaranteed += Number(item.guaranteed || 0);
-          result.reach += actual;
-          result.clicks += Number(item.clicks || 0);
-          result.leads += Number(item.leads || 0);
-          result.sales += Number(item.sales || 0);
-          result.revenue += Number(item.revenue || 0);
-        });
-        var evidenceKeys = {};
-        var evidenceIncluded = false;
-        evidenceReports.forEach(function (report) {
-          var date = String(report.date || "");
-          var identity = normalizeBloggerIdentity(report.blogger);
-          var reach = Number(report.reach || 0);
-          if (!identity || date.slice(0,7) !== month || reach <= 0 || reach > MAX_BLOGGER_REACH) return;
-          if (report.status && report.status !== "Подтверждено") return;
-          var evidenceKey = identity + "|" + date;
-          if (evidenceKeys[evidenceKey]) return;
-          evidenceKeys[evidenceKey] = true;
-          var matches = ensureBloggerLookupIndex().byIdentity[identity] || [];
-          var blogger = matches[0];
-          if (!blogger || blogger.brand !== direction) return;
-          var recordedReach = Number(placementReachByKey[evidenceKey] || 0);
-          var reportClicks = Math.max(0,Number(report.clicks || 0));
-          var recordedClicks = Number(placementClicksByKey[evidenceKey] || 0);
-          if (!placementKeys[evidenceKey]) {
-            placementKeys[evidenceKey] = true;
-            result.exits += 1;
-          }
-          if (reach > recordedReach) {
-            result.reach += reach - recordedReach;
-            placementReachByKey[evidenceKey] = reach;
-          }
-          if (reportClicks > recordedClicks) {
-            result.clicks += reportClicks - recordedClicks;
-            placementClicksByKey[evidenceKey] = reportClicks;
-          }
-          bloggerKeys[identity] = true;
-          evidenceIncluded = true;
-        });
-        if (evidenceIncluded) result.source = "Размещения и подтверждённые отчёты";
-        if (!result.exits) {
-          bloggers.filter(function (item) {
-            return item.brand === direction && item.status === "Вышел" && (monthFromDateValue(item.last) || monthFromDateValue(item.sortDate)) === month;
-          }).forEach(function (item) {
-            var identity = normalizeBloggerIdentity(item.sourceKey || item.link || item.name || item.display) || String(item.id);
-            bloggerKeys[identity] = true;
-            result.exits += 1;
-            result.reach += Number(item.reach || 0);
-            result.clicks += Number(item.clicks || 0);
-            result.leads += Number(item.leads || 0);
-            result.sales += Number(item.sales || 0);
-            result.revenue += Number(item.revenue || 0);
-            result.costs += Number(item.spent || 0);
-          });
-          result.source = "Карточки блогеров";
-        }
-        result.guaranteed = monthlyExitGuarantee(month,direction);
-        result.source = result.source === "Размещения и подтверждённые отчёты" ? "Выходы и подтверждённые отчёты" : "Выходы";
-        result.bloggers = Object.keys(bloggerKeys).length;
-        return result;
+        return canonicalMonthlyExitFact(month,{direction:direction});
       }
       function dashboardDirectionCard(item,month) {
         var isLn = item.direction === "ЛН";
@@ -1258,17 +1312,11 @@
         });
         var directionFacts = [monthlyDirectionFact(month,"ЛН"),monthlyDirectionFact(month,"FIT PRO")];
         var departmentPlan = monthlyDepartmentPlanSetting(month);
-        var financeCurrent = currentFinanceData && currentFinanceData.current && currentFinanceData.current.month === month ? currentFinanceData.current : null;
-        directionFacts.forEach(function (item) {
-          var financeKey = item.direction === "FIT PRO" ? "fit" : "ln";
-          var financeRevenue = financeCurrent && financeCurrent.directions && financeCurrent.directions[financeKey] && financeCurrent.directions[financeKey].metrics && financeCurrent.directions[financeKey].metrics.revenue;
-          var fallbackValue = item.direction === "FIT PRO" ? departmentPlan.revenueFitFact : departmentPlan.revenueLnFact;
-          var sourceValue = financeRevenue && financeRevenue.fact != null ? financeRevenue.fact : fallbackValue;
-          if (sourceValue != null && Number.isFinite(Number(sourceValue)) && Number(sourceValue) >= 0) {
-            item.revenue = Number(sourceValue);
-            item.source = String(item.source || "").replace(/\s*·\s*Выручка:.*$/,"") + " · Выручка: Отчет " + (item.direction === "FIT PRO" ? "FIT PRO" : "ЛН");
-          }
-        });
+        var financeCurrent = financeEntryForMonth(month);
+        directionFacts.forEach(function (item) { applyOfficialDirectionMetrics(item,month); });
+        totals.dayOutreachPlan = Math.max(0,Number(departmentPlan.outreachDay || 0));
+        totals.monthOutreachPlan = Math.max(0,Number(departmentPlan.outreachMonth || 0));
+        renderDepartmentOutreachPlanEditor(month);
         var directionTotal = directionFacts.reduce(function (sum,item) {
           ["exits","guaranteed","reach","clicks","leads","sales","revenue","costs","bloggers"].forEach(function (field) { sum[field] += Number(item[field] || 0); });
           return sum;
@@ -1594,6 +1642,8 @@
         safely("staff selectors",refreshStaffSelectors);
         safely("KPI controls",populateKpiControls);
         safely("month filters",refreshMonthFilters);
+        safely("new bloggers",renderNewBloggersMonth);
+        if (currentFinanceData) safely("finance reconciliation",function () { attachProgramFinanceMetrics(currentFinanceData); });
         safely("current page",renderCurrentPageData);
         safely("data health",renderDataHealth);
         if (currentBloggerId) safely("blogger card",function () {
@@ -2228,6 +2278,62 @@
       function kpiMonths() {
         return [activeMonthKey()].concat(departmentMonths.map(function (item) { return item.month; }),synchronizedPlacementRecords().map(function (item) { return (item.sortDate || "").slice(0,7); })).filter(function (value,index,array) { return value && /^\d{4}-\d{2}$/.test(value) && array.indexOf(value) === index; }).sort().reverse();
       }
+      function newBloggersForMonth(month) {
+        return bloggers.filter(function (blogger) { return monthFromDateValue(blogger.createdAt) === month; }).sort(function (a,b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); });
+      }
+      function automaticKpiMonthBloggers(month) {
+        return newBloggersForMonth(month).map(function (blogger) {
+          return {
+            month:month,
+            bloggerKey:String(blogger.id),
+            bloggerName:blogger.display || blogger.name,
+            manager:blogger.manager || blogger.createdByName || "Не назначен",
+            assistant:blogger.createdByRole === "assistant" ? blogger.createdByName || "" : "",
+            factReach:Math.max(0,Number(blogger.reach || 0)),
+            note:"Добавлен автоматически по дате создания",
+            automatic:true
+          };
+        });
+      }
+      function resolvedKpiMonthBloggers(month) {
+        var byKey = {};
+        automaticKpiMonthBloggers(month).forEach(function (item) { byKey[String(item.bloggerKey)] = item; });
+        kpiMonthBloggers.filter(function (item) { return item.month === month; }).forEach(function (item) {
+          var previous = byKey[String(item.bloggerKey)] || {};
+          byKey[String(item.bloggerKey)] = Object.assign({},previous,item,{automatic:Boolean(previous.automatic)});
+        });
+        return Object.keys(byKey).map(function (key) { return byKey[key]; });
+      }
+      function renderNewBloggersMonth() {
+        var table = document.getElementById("newBloggersMonthTable");
+        if (!table) return;
+        if (role !== "leader") { table.innerHTML = ""; return; }
+        var month = activeMonthKey();
+        var rows = newBloggersForMonth(month);
+        document.getElementById("newBloggersMonthCount").textContent = number(rows.length) + " · " + activeMonthLabel(month).toLowerCase();
+        table.innerHTML = rows.map(function (blogger) {
+          var rawLink = String(blogger.link || "").trim();
+          var href = /^https?:\/\//i.test(rawLink) ? rawLink : rawLink ? "https://instagram.com/" + rawLink.replace(/^@/,"") : "";
+          var link = href ? '<a href="' + safeText(href) + '" target="_blank" rel="noopener">Открыть ↗</a>' : '<span style="color:var(--muted)">Не добавлена</span>';
+          var created = blogger.createdAt ? new Date(blogger.createdAt).toLocaleDateString("ru-RU") : "—";
+          var creator = blogger.createdByName || blogger.manager || "Импорт";
+          var creatorRole = blogger.createdByRole === "assistant" ? "Ассистент" : blogger.createdByRole === "manager" ? "Менеджер" : blogger.createdByRole === "leader" ? "Администратор" : "";
+          return '<tr><td><div class="blogger-cell blogger-card-link" data-open-blogger="' + safeText(blogger.id) + '"><div class="mini-avatar">' + initials(blogger.display || blogger.name) + '</div><div><strong>' + safeText(blogger.display || blogger.name) + '</strong><small>Открыть карточку</small></div></div></td><td>' + link + '</td><td><span class="badge ' + badgeClass(blogger.status) + '">' + safeText(blogger.status || "Без статуса") + '</span></td><td>' + safeText(blogger.brand || "—") + '</td><td>' + safeText(blogger.manager || "Не назначен") + '</td><td><b>' + safeText(creator) + '</b><small style="display:block">' + safeText(creatorRole) + '</small></td><td>' + safeText(created) + '</td></tr>';
+        }).join("") || '<tr><td colspan="7"><div class="empty-state">В ' + activeMonthLabel(month).toLowerCase() + ' новые блогеры ещё не добавлены.</div></td></tr>';
+      }
+      function renderKpiReachPlan() {
+        var table = document.getElementById("kpiReachPlanTable");
+        if (!table) return;
+        var monthSelect = document.getElementById("kpiMonthSelect");
+        var month = monthSelect && monthSelect.value || activeMonthKey();
+        document.getElementById("kpiReachPlanMonth").textContent = kpiMonthLabel(month);
+        table.innerHTML = activeEmployeeManagers().map(function (manager) {
+          var plan = monthlyPlanSetting(manager,month);
+          var fact = monthlyManagerFact(manager,month);
+          var progress = rate(fact.reach,plan.reach);
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(manager) + '</div><div><strong>' + safeText(manager) + '</strong><small>План редактируется в «Отчёты → План / факт»</small></div></div></td><td><b>' + number(plan.reach) + '</b></td><td><b>' + number(fact.reach) + '</b></td><td><span class="' + metricState(progress,100,.7) + '">' + percent(progress,1) + '</span></td></tr>';
+        }).join("") || '<tr><td colspan="4"><div class="empty-state">Активные менеджеры не найдены.</div></td></tr>';
+      }
       function kpiMonthLabel(value) {
         var names = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
         var parts = value.split("-");
@@ -2275,7 +2381,7 @@
           var key = linkedBlogger ? "id:" + String(linkedBlogger.id) : (normalizeBloggerIdentity(item.sourceKey || item.tag) || String(item.sourceKey || item.tag));
           bloggerReach[key] = Math.max(Number(bloggerReach[key] || 0),reach);
         });
-        var manualRows = kpiMonthBloggers.filter(function (item) { return item.month === month && employeeNameMatches(manager,item.manager); });
+        var manualRows = resolvedKpiMonthBloggers(month).filter(function (item) { return employeeNameMatches(manager,item.manager); });
         manualRows.forEach(function (item) {
           var key = "id:" + String(item.bloggerKey);
           var previous = Number(bloggerReach[key] || 0);
@@ -2339,12 +2445,14 @@
         if (!table) return;
         var month = document.getElementById("kpiMonthSelect").value || activeMonthKey();
         document.getElementById("kpiRosterMonthBadge").textContent = kpiMonthLabel(month);
-        var records = kpiMonthBloggers.filter(function (item) { return item.month === month; }).sort(function (a,b) { return String(a.bloggerName).localeCompare(String(b.bloggerName),"ru"); });
+        var records = resolvedKpiMonthBloggers(month).sort(function (a,b) { return String(a.bloggerName).localeCompare(String(b.bloggerName),"ru"); });
         table.innerHTML = records.map(function (item) {
           var blogger = bloggers.find(function (entry) { return String(entry.id) === String(item.bloggerKey); });
           var open = blogger ? ' data-open-blogger="' + safeText(blogger.id) + '"' : '';
-          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + safeText(item.manager) + '</td><td><b>' + number(item.factReach) + '</b></td><td><span class="badge badge-blue">' + safeText(kpiReachCategory(item.factReach)) + '</span></td><td>' + safeText(item.note || '—') + '</td><td><button class="btn btn-sm btn-outline" type="button" data-remove-kpi-blogger="' + safeText(item.bloggerKey) + '" data-kpi-month="' + safeText(item.month) + '">Удалить</button></td></tr>';
-        }).join("") || '<tr><td colspan="7"><div class="empty-state">В ' + kpiMonthLabel(month).toLowerCase() + ' блогеры KPI ещё не добавлены. Добавьте их вручную выше.</div></td></tr>';
+          var responsibility = safeText(item.manager) + (item.assistant ? '<small style="display:block">Добавил ассистент: ' + safeText(item.assistant) + '</small>' : '');
+          var action = item.automatic ? '<span class="badge badge-green">Добавлен автоматически</span>' : '<button class="btn btn-sm btn-outline" type="button" data-remove-kpi-blogger="' + safeText(item.bloggerKey) + '" data-kpi-month="' + safeText(item.month) + '">Удалить</button>';
+          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + responsibility + '</td><td><b>' + number(item.factReach) + '</b></td><td><span class="badge badge-blue">' + safeText(kpiReachCategory(item.factReach)) + '</span></td><td>' + safeText(item.note || '—') + '</td><td>' + action + '</td></tr>';
+        }).join("") || '<tr><td colspan="7"><div class="empty-state">В ' + kpiMonthLabel(month).toLowerCase() + ' новые блогеры ещё не добавлены.</div></td></tr>';
       }
       function populateKpiControls() {
         var managers = kpiManagers();
@@ -2362,6 +2470,7 @@
         if (months.indexOf(currentSalaryMonth) >= 0) document.getElementById("salaryMonthFilter").value = currentSalaryMonth;
         populateKpiBloggerSelect();
         renderKpiBloggerRoster();
+        renderKpiReachPlan();
       }
       function renderSalaryTable() {
         if (role !== "leader") { document.getElementById("salaryTable").innerHTML = ""; document.getElementById("salarySummaryGrid").innerHTML = ""; return; }
@@ -2480,7 +2589,7 @@
         Object.keys(dailyAssistantReports).filter(function (date) { return date.slice(0,7) === month; }).forEach(function (date) {
           Object.keys(dailyAssistantReports[date] || {}).forEach(function (name) {
             var report = dailyAssistantReports[date][name] || {};
-            outreach += Number(report.outreach || 0);
+            outreach += Number(report.fact || 0);
             approvals += Number(report.approvals || 0);
           });
         });
@@ -2607,7 +2716,7 @@
         document.getElementById("kpiManualReachAmount").value = result.reachKpi;
         document.getElementById("kpiBaseSalary").value = result.base;
         document.getElementById("kpiSanctions").value = result.sanctions;
-        document.getElementById("kpiCalculatorSource").textContent = "Расчёт за " + kpiMonthLabel(month).toLowerCase() + ": " + result.placements + " размещений с фактическим охватом, " + result.manualCount + " блогеров добавлено администратором, " + result.confirmed + " зачтено в KPI, " + result.pending + " ожидают ввода. Автоматическая сумма KPI за охват — " + money(result.autoReachKpi) + "; администратор может заменить её вручную.";
+        document.getElementById("kpiCalculatorSource").textContent = "Расчёт за " + kpiMonthLabel(month).toLowerCase() + ": " + result.placements + " размещений с фактическим охватом, " + result.manualCount + " новых блогеров месяца учтено автоматически или уточнено администратором, " + result.confirmed + " зачтено в KPI, " + result.pending + " ожидают ввода. Автоматическая сумма KPI за охват — " + money(result.autoReachKpi) + "; администратор может заменить её вручную.";
         renderKpiCalculator();
       }
       function renderAcceptanceStatus() {
@@ -3564,11 +3673,11 @@
         var page = currentPageName();
         if (page === "dashboard") { renderKpis(); renderTopBloggers(); renderDashboardMonthSummary(); renderDepartmentMonthControl(); }
         else if (page === "profile") renderEmployeeProfile();
-        else if (page === "bloggers") renderBloggers();
+        else if (page === "bloggers") { renderBloggers(); renderNewBloggersMonth(); }
         else if (page === "placements") renderPlacementRecords();
         else if (page === "calendar") renderWeeklyExits();
         else if (page === "reports") { renderEvidenceReports(); renderManagerMetrics(); renderMonthlyPlanFact(); }
-        else if (page === "kpi") { renderSalaryTable(); renderKpiBloggerRoster(); loadKpiFromData(); }
+        else if (page === "kpi") { renderSalaryTable(); renderKpiBloggerRoster(); renderKpiReachPlan(); loadKpiFromData(); }
         else if (page === "team") renderEmployees();
       }
       function navigate(page) {
@@ -3758,6 +3867,8 @@
         var name = document.getElementById("newName").value.trim();
         var newBlogger = {
           id: Date.now(), createdAt:new Date().toISOString(), name:name, display:name.replace("@",""), link:document.getElementById("newLink").value.trim(),
+          createdByName:currentEmployeeProfile && currentEmployeeProfile.name || currentUserProfile && (currentUserProfile.name || currentUserProfile.email) || "Сотрудник NSL",
+          createdByRole:currentEmployeeProfile && currentEmployeeProfile.role || role,
           platforms:selectedPlatforms, status:document.getElementById("newStatus").value,
           manager:document.getElementById("newManager").value, brand:document.getElementById("newBrand").value,
           commercialContract:document.getElementById("newCommercialContract").value,
@@ -4071,6 +4182,22 @@
       });
       document.getElementById("managerMonthlyPlanFilter").addEventListener("change", renderMonthlyPlanFact);
       document.getElementById("dashboardOutreachDate").addEventListener("change",renderDashboardMonthSummary);
+      [["departmentOutreachDayPlan","outreachDay"],["departmentOutreachMonthPlan","outreachMonth"]].forEach(function (config) {
+        var input = document.getElementById(config[0]);
+        if (!input) return;
+        input.addEventListener("change",function () {
+          if (role !== "leader") return;
+          var month = activeMonthKey();
+          if (!monthlyManagerPlans[month]) monthlyManagerPlans[month] = {};
+          var plan = monthlyDepartmentPlanSetting(month);
+          plan[config[1]] = Math.max(0,Number(input.value || 0));
+          monthlyManagerPlans[month].__department__ = plan;
+          sessionStorage.setItem("nslMonthlyManagerPlans",JSON.stringify(monthlyManagerPlans));
+          queueSharedStateRecords([sharedStateRecord("monthly_plan",month + "|__department__",{month:month,name:"__department__",plan:plan})]);
+          renderDashboardMonthSummary();
+          showToast("План рассылок отдела сохранён");
+        });
+      });
       document.getElementById("managerMonthlyPlanTable").addEventListener("change", function (event) {
         var input = event.target.closest("[data-monthly-plan]");
         if (!input || role !== "leader") return;
@@ -4250,7 +4377,7 @@
       document.getElementById("kpiManagerSelect").addEventListener("change",function () { populateKpiBloggerSelect(); loadKpiFromData(); });
       document.getElementById("kpiMonthSelect").addEventListener("change",function (event) {
         var month = event.target.value;
-        renderKpiBloggerRoster(); updateKpiBloggerDefaults(true);
+        renderKpiBloggerRoster(); renderKpiReachPlan(); updateKpiBloggerDefaults(true);
         if (!kpiRosterLoadedMonths[month]) hydrateKpiMonthBloggers(month).catch(function () { showToast("Не удалось обновить список блогеров KPI"); });
         else loadKpiFromData();
       });
@@ -4565,6 +4692,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=89",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=90",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
