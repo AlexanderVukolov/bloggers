@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v88-secure-shell";
+const CACHE_NAME = "nsl-bloggers-github-v89-access-recovery";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,

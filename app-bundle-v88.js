@@ -23,7 +23,7 @@
       var SUPABASE_URL = "https://wmnymdmjiczbmjyztcze.supabase.co";
       var SUPABASE_KEY = "sb_publishable_Uqq-PpfJkZVkPYbd6CsYlQ_zKlTJPG4";
       var API_ROOT = SUPABASE_URL + "/functions/v1/bloggers-api";
-      var supabaseClient = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storage:window.sessionStorage,autoRefreshToken:true,detectSessionInUrl:true}});
+      var supabaseClient = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:true}});
       var currentSession = null;
       var sessionActivationPromise = null;
       var currentUserProfile = null;
@@ -31,7 +31,11 @@
       var employeeProfileTargetId = "";
       var registrationInviteMatch = String(window.location.hash || "").match(/(?:^#|&)invite=([a-f0-9]{64})(?:&|$)/i);
       var registrationInviteToken = registrationInviteMatch ? registrationInviteMatch[1].toLowerCase() : "";
-      if (registrationInviteMatch) history.replaceState(null,"",window.location.pathname + window.location.search);
+      var adminAccessMatch = String(window.location.hash || "").match(/(?:^#|&)access=([a-f0-9]{64})(?:&|$)/i);
+      var adminLinkOpened = Boolean(adminAccessMatch);
+      if (adminAccessMatch) localStorage.setItem("nslAdminAccess",adminAccessMatch[1].toLowerCase());
+      if (adminAccessMatch || registrationInviteMatch) history.replaceState(null,"",window.location.pathname + window.location.search);
+      var adminAccessToken = localStorage.getItem("nslAdminAccess") || "";
       function publicApiFetch(path,init) {
         var options = Object.assign({},init || {});
         var headers = new Headers(options.headers || {});
@@ -44,6 +48,7 @@
         var headers = new Headers(options.headers || {});
         headers.set("apikey",SUPABASE_KEY);
         if (currentSession && currentSession.access_token) headers.set("authorization","Bearer " + currentSession.access_token);
+        else if (adminAccessToken) headers.set("x-nsl-access",adminAccessToken);
         options.headers = headers;
         return window.fetch(API_ROOT + path,options);
       }
@@ -1704,7 +1709,7 @@
       }
       var staleSessionRefreshPromise = null;
       function refreshStaleSessionData() {
-        if (!currentSession || !appShell || appShell.classList.contains("hidden")) return Promise.resolve();
+        if ((!currentSession && !adminAccessToken) || !appShell || appShell.classList.contains("hidden")) return Promise.resolve();
         if (staleSessionRefreshPromise) return staleSessionRefreshPromise;
         if (sharedStateLastSuccessfulFetch && Date.now() - sharedStateLastSuccessfulFetch < 5 * 60 * 1000) return Promise.resolve();
         staleSessionRefreshPromise = syncAllData(false).finally(function () { staleSessionRefreshPromise = null; });
@@ -3695,6 +3700,8 @@
         }).finally(function () { button.disabled = false; button.textContent = "Войти"; });
       });
       document.getElementById("logoutBtn").addEventListener("click", function () {
+        localStorage.removeItem("nslAdminAccess");
+        adminAccessToken = "";
         sessionStorage.clear();
         supabaseClient.auth.signOut().finally(function () { currentSession = null; appShell.classList.add("hidden"); loginScreen.classList.remove("hidden"); });
       });
@@ -4545,17 +4552,19 @@
         document.getElementById("loginMessage").innerHTML = "<b>Персональное приглашение найдено.</b> После регистрации вы сразу попадёте в свой кабинет.";
       }
       supabaseClient.auth.onAuthStateChange(function (event,session) {
-        if (!registrationInviteToken && session && (!currentSession || currentSession.access_token !== session.access_token)) activateSession(session).catch(function () {});
+        if (!registrationInviteToken && !adminLinkOpened && session && (!currentSession || currentSession.access_token !== session.access_token)) activateSession(session).catch(function () {});
         if (event === "SIGNED_OUT") { currentSession = null; appShell.classList.add("hidden"); loginScreen.classList.remove("hidden"); }
       });
       supabaseClient.auth.getSession().then(function (result) {
         if (registrationInviteToken) { loginScreen.classList.remove("hidden"); appShell.classList.add("hidden"); return; }
+        if (adminLinkOpened && adminAccessToken) return activateSession(null);
         if (result.data && result.data.session) return activateSession(result.data.session);
+        if (adminAccessToken) return activateSession(null);
         loginScreen.classList.remove("hidden"); appShell.classList.add("hidden");
       }).catch(function () { loginScreen.classList.remove("hidden"); appShell.classList.add("hidden"); });
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=88",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=89",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
