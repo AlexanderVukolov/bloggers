@@ -5,6 +5,13 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(require("node:path").join(__dirname,"..","app-bundle-v88.js"),"utf8");
 
+test("login remains compatible with existing eight-character passwords",() => {
+  assert.match(source,/passwordInput\.minLength = 8/);
+  assert.match(source,/password\.length < 8/);
+  assert.doesNotMatch(source,/password\.length < 12/);
+  assert.match(source,/Минимум 8 символов/);
+});
+
 function extractFunction(name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start,-1,`function ${name} should exist`);

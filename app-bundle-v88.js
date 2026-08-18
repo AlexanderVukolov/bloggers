@@ -1,4 +1,13 @@
 (function () {
+  ["loginPassword","loginPasswordConfirm"].forEach(function (id) {
+    var passwordInput = document.getElementById(id);
+    if (!passwordInput) return;
+    passwordInput.minLength = 8;
+    passwordInput.setAttribute("minlength","8");
+  });
+  var loginPasswordInput = document.getElementById("loginPassword");
+  if (loginPasswordInput) loginPasswordInput.placeholder = "Не менее 8 символов";
+
   var saveActualField = document.getElementById("saveCardActualBtn").closest(".field");
   saveActualField.insertAdjacentHTML("beforebegin", '<div class="field"><label>Клики по размещению</label><input class="input" id="cardActualClicks" type="number" min="0" max="1000000000" step="1" placeholder="Введите количество кликов"><small>Сохраняются вместе с охватом и попадают в общую статистику.</small></div>');
 
@@ -3903,8 +3912,8 @@
         button.disabled = true; button.textContent = mode === "register" ? "Создаю кабинет…" : "Вхожу…";
         if (mode === "register") {
           var confirmation = document.getElementById("loginPasswordConfirm").value;
-          if (password.length < 12 || password !== confirmation) {
-            message.innerHTML = "<b>Проверьте пароль.</b> Минимум 12 символов, оба поля должны совпадать.";
+          if (password.length < 8 || password !== confirmation) {
+            message.innerHTML = "<b>Проверьте пароль.</b> Минимум 8 символов, оба поля должны совпадать.";
             button.disabled = false; button.textContent = "Зарегистрироваться"; return;
           }
           message.innerHTML = "Активирую персональный кабинет и связываю историю…";
@@ -4817,6 +4826,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=91",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=92",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
