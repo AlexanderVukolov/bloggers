@@ -55,6 +55,41 @@
     if (dailySummaryView) dailySummaryView.insertAdjacentHTML("afterend", '<div class="report-view hidden" id="report-view-summary"><div class="report-section-head"><div><h3>Месячная сводка</h3><p>Ежедневные отчёты и результаты размещений за выбранный месяц</p></div><div class="actions"><input class="input" id="monthlyControlMonth" type="month" style="width:auto"><select class="select" id="monthlyControlEmployee" style="width:auto"><option value="all">Все сотрудники</option></select><span class="badge badge-green" id="monthlyControlPeriod">Текущий месяц</span></div></div><div class="grid manager-kpis" id="monthlyControlKpis"></div><div class="report-section-head"><div><h3>Сотрудники</h3><p>Менеджеры и ассистенты в одной месячной сводке</p></div></div><div class="card table-card"><div class="table-wrap"><table style="min-width:1840px"><thead><tr><th>Сотрудник</th><th>Роль</th><th>Дней с отчётом</th><th>План / факт рассылок</th><th>Ответы</th><th>Согласия</th><th>Новые блогеры</th><th>Передано менеджеру</th><th>Выходы</th><th>Гарант</th><th>Факт охвата</th><th>% плана охвата</th><th>Клики</th><th>Продажи</th><th>Выручка</th></tr></thead><tbody id="monthlyControlTable"></tbody></table></div><div class="table-note">Дневные показатели суммируются из сохранённых отчётов. Выходы, гарант, охват, клики, продажи и выручка берутся из единого реестра размещений. Данные удалённых сотрудников остаются в истории.</div></div></div>');
   }
 
+  var financeNavButton = document.querySelector('[data-page="finance"]');
+  if (financeNavButton && !document.querySelector('[data-page="summary"]')) {
+    financeNavButton.insertAdjacentHTML("afterend", '<button class="nav-btn leader-only" data-page="summary"><span class="nav-icon">СВ</span>Сводка</button>');
+  }
+  var financePage = document.getElementById("page-finance");
+  if (financePage && !document.getElementById("page-summary")) {
+    financePage.insertAdjacentHTML("beforebegin", `<section class="page leader-only" id="page-summary">
+      <div class="page-head">
+        <div><h2>Сводка</h2><p>Расходы, ФОТ и выручка по месяцам — только для администраторов</p></div>
+        <div class="actions"><button class="btn btn-sm btn-outline" id="refreshAdminSummaryBtn" type="button">↻ Обновить</button></div>
+      </div>
+      <div class="import-strip summary-source-strip"><strong>🔒 Администраторы</strong><span id="adminSummarySourceNote">Загружаю данные из таблицы «Сводка»…</span><span class="badge badge-blue" id="adminSummarySyncStatus">Обновление</span></div>
+      <div class="grid grid-4 summary-kpi-grid" id="adminSummaryKpis"></div>
+      <article class="card card-pad summary-editor-card">
+        <div class="card-title"><div><h3 id="adminSummaryEditorTitle">Добавить месяц</h3><p>Создайте новый месяц или выберите «Изменить» в таблице. Ручные значения имеют приоритет над загрузкой.</p></div><span class="badge badge-green">Сохраняется в CRM</span></div>
+        <form id="adminSummaryForm">
+          <div class="form-grid summary-form-grid">
+            <div class="field"><label>Месяц</label><input class="input" id="adminSummaryMonth" type="month" required></div>
+            <div class="field"><label>Расходы на рекламу, ₽</label><input class="input" id="adminSummaryAdvertisingCosts" type="number" min="0" step="0.01" required></div>
+            <div class="field"><label>Расходы ФОТ, ₽</label><input class="input" id="adminSummaryPayrollCosts" type="number" min="0" step="0.01" required></div>
+            <div class="field"><label>Выручка, ₽</label><input class="input" id="adminSummaryRevenue" type="number" min="0" step="0.01" required></div>
+            <div class="field"><label>Бартер, ₽</label><input class="input" id="adminSummaryBarterRevenue" type="number" min="0" step="0.01" value="0"></div>
+            <div class="field"><label>Коммерция, ₽</label><input class="input" id="adminSummaryCommercialRevenue" type="number" min="0" step="0.01" value="0"></div>
+          </div>
+          <div class="actions summary-form-actions"><button class="btn btn-primary" id="saveAdminSummaryBtn" type="submit">Сохранить месяц</button><button class="btn btn-outline" id="resetAdminSummaryBtn" type="button">Очистить</button></div>
+        </form>
+      </article>
+      <article class="card card-pad">
+        <div class="card-title"><div><h3>Месячная сводка</h3><p>Новые месяцы из источника появляются автоматически; администратор может дополнить или заменить значения</p></div><span class="badge badge-blue" id="adminSummaryMonthCount">0 месяцев</span></div>
+        <div class="table-wrap"><table class="summary-table"><thead><tr><th>Месяц</th><th>Реклама</th><th>ФОТ</th><th>Затраты всего</th><th>Выручка</th><th>Бартер</th><th>Коммерция</th><th>ROI</th><th>ROMI</th><th>Источник</th><th></th></tr></thead><tbody id="adminSummaryTable"></tbody></table></div>
+        <div class="table-note">ROI = (выручка − реклама − ФОТ) / (реклама + ФОТ). ROMI = (выручка − реклама) / реклама.</div>
+      </article>
+    </section>`);
+  }
+
   var contractDateAnchor = document.getElementById("employeeBaseSalary");
   if (contractDateAnchor && !document.getElementById("employeeContractDate")) {
     contractDateAnchor.closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label>Дата договора оказания услуг</label><input class="input" id="employeeContractDate" type="date"></div>');
@@ -108,6 +143,7 @@
       var MAX_BLOGGER_REACH = 1000000000;
       var importedEugeniaStats = window.NSL_EUGENIA_STATS || {dailyReports:{},monthly:{}};
       var currentFinanceData = null;
+      var currentAdminSummary = {rows:[],source:null,updatedAt:""};
       var baseBloggers = importedData ? importedData.bloggers : [];
       var datasetVersion = importedData ? "google-sheets-" + importedData.meta.snapshot + "-" + importedData.meta.bloggers : "demo";
       var storedBloggers = JSON.parse(sessionStorage.getItem("nslBloggers") || "null");
@@ -289,6 +325,7 @@
         dashboard:["Главная","Рабочий путь и основные показатели"],
         profile:["Мой кабинет","Роль и история показателей"],
         finance:["Финансы","План, факт, затраты и эффективность отдела"],
+        summary:["Сводка","Расходы, ФОТ и выручка по месяцам"],
         bloggers:["Блогеры","Общая база ЛН и FIT PRO"],
         placements:["Единый реестр размещений","Одна строка — одно размещение, все форматы внутри карточки"],
         calendar:["Выходы","Календарь публикаций и прогревов"],
@@ -560,6 +597,97 @@
           }
           return null;
         }).finally(function () { if (button && canRenderFinance) button.disabled = false; });
+      }
+      function adminSummaryPercent(value) {
+        return value == null || !Number.isFinite(Number(value)) ? "—" : percent(Number(value),1);
+      }
+      function adminSummarySourceBadge(row) {
+        if (row.source === "manual") return '<span class="badge badge-green">CRM · вручную</span>';
+        if (row.source === "sheet") return '<span class="badge badge-blue">Таблица · актуально</span>';
+        return '<span class="badge badge-amber">Таблица · снимок</span>';
+      }
+      function renderAdminSummary(data) {
+        if (role !== "leader") return;
+        currentAdminSummary = data || {rows:[],source:null,updatedAt:""};
+        var rows = (currentAdminSummary.rows || []).slice().sort(function (a,b) { return String(b.month).localeCompare(String(a.month)); });
+        var totals = rows.reduce(function (result,row) {
+          result.advertisingCosts += Number(row.advertisingCosts || 0);
+          result.payrollCosts += Number(row.payrollCosts || 0);
+          result.totalCosts += Number(row.totalCosts || 0);
+          result.revenue += Number(row.revenue || 0);
+          return result;
+        },{advertisingCosts:0,payrollCosts:0,totalCosts:0,revenue:0});
+        var totalRoi = totals.totalCosts > 0 ? (totals.revenue - totals.totalCosts) / totals.totalCosts * 100 : null;
+        var cards = [
+          ["Выручка",money(totals.revenue),rows.length + " мес."],
+          ["Реклама",money(totals.advertisingCosts),"по всем месяцам"],
+          ["ФОТ",money(totals.payrollCosts),"по всем месяцам"],
+          ["Общий ROI",adminSummaryPercent(totalRoi),"по суммарным данным"]
+        ];
+        document.getElementById("adminSummaryKpis").innerHTML = cards.map(function (card) { return '<article class="card kpi"><div class="kpi-top"><span>' + card[0] + '</span></div><div class="kpi-value">' + card[1] + '</div><div class="kpi-foot">' + card[2] + '</div></article>'; }).join("");
+        document.getElementById("adminSummaryMonthCount").textContent = rows.length + " " + (rows.length === 1 ? "месяц" : rows.length > 1 && rows.length < 5 ? "месяца" : "месяцев");
+        document.getElementById("adminSummaryTable").innerHTML = rows.length ? rows.map(function (row) {
+          return '<tr><td><b>' + safeText(activeMonthLabel(row.month)) + '</b></td><td>' + money(Number(row.advertisingCosts || 0)) + '</td><td>' + money(Number(row.payrollCosts || 0)) + '</td><td><b>' + money(Number(row.totalCosts || 0)) + '</b></td><td><b>' + money(Number(row.revenue || 0)) + '</b></td><td>' + money(Number(row.barterRevenue || 0)) + '</td><td>' + money(Number(row.commercialRevenue || 0)) + '</td><td>' + adminSummaryPercent(row.roi) + '</td><td>' + adminSummaryPercent(row.romi) + '</td><td>' + adminSummarySourceBadge(row) + '</td><td><button class="btn btn-sm btn-outline" type="button" data-edit-admin-summary="' + safeText(row.month) + '">Изменить</button></td></tr>';
+        }).join("") : '<tr><td colspan="11"><div class="empty-state">Добавьте первый месяц в CRM.</div></td></tr>';
+        var mode = currentAdminSummary.source && currentAdminSummary.source.mode;
+        var updated = currentAdminSummary.updatedAt ? new Date(currentAdminSummary.updatedAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
+        var status = document.getElementById("adminSummarySyncStatus");
+        status.className = "badge " + (mode === "live-sheet" ? "badge-green" : mode === "sheet-cache" ? "badge-amber" : "badge-blue");
+        status.textContent = mode === "live-sheet" ? "Таблица · актуально" : mode === "sheet-cache" ? "Сохранённый снимок" : "Данные CRM";
+        document.getElementById("adminSummarySourceNote").textContent = mode === "live-sheet" ? "Новые месяцы автоматически загружаются из «Сводки». Обновлено " + updated + "." : mode === "sheet-cache" ? "Показан последний снимок таблицы; ручные правки CRM применены поверх него. Обновлено " + updated + "." : "Таблица закрыта для серверного чтения; текущие месяцы и ручные правки сохранены в CRM.";
+      }
+      function resetAdminSummaryForm() {
+        var form = document.getElementById("adminSummaryForm");
+        if (!form) return;
+        form.reset();
+        document.getElementById("adminSummaryMonth").value = activeMonthKey();
+        document.getElementById("adminSummaryBarterRevenue").value = "0";
+        document.getElementById("adminSummaryCommercialRevenue").value = "0";
+        document.getElementById("adminSummaryEditorTitle").textContent = "Добавить месяц";
+        document.getElementById("saveAdminSummaryBtn").textContent = "Сохранить месяц";
+      }
+      function editAdminSummaryMonth(month) {
+        var row = (currentAdminSummary.rows || []).find(function (item) { return item.month === month; });
+        if (!row) return;
+        document.getElementById("adminSummaryMonth").value = row.month;
+        document.getElementById("adminSummaryAdvertisingCosts").value = row.advertisingCosts || 0;
+        document.getElementById("adminSummaryPayrollCosts").value = row.payrollCosts || 0;
+        document.getElementById("adminSummaryRevenue").value = row.revenue || 0;
+        document.getElementById("adminSummaryBarterRevenue").value = row.barterRevenue || 0;
+        document.getElementById("adminSummaryCommercialRevenue").value = row.commercialRevenue || 0;
+        document.getElementById("adminSummaryEditorTitle").textContent = "Изменить · " + activeMonthLabel(row.month);
+        document.getElementById("saveAdminSummaryBtn").textContent = "Сохранить изменения";
+        document.getElementById("adminSummaryForm").scrollIntoView({behavior:"smooth",block:"center"});
+      }
+      function hydrateAdminSummary() {
+        if (role !== "leader") return Promise.resolve();
+        var button = document.getElementById("refreshAdminSummaryBtn");
+        if (button) button.disabled = true;
+        return apiFetch("/api/admin-summary",{headers:{"cache-control":"no-store","x-nsl-role":role}}).then(function (response) {
+          if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось загрузить сводку"); });
+          return response.json();
+        }).then(function (data) { renderAdminSummary(data); }).catch(function (error) {
+          document.getElementById("adminSummarySyncStatus").className = "badge badge-red";
+          document.getElementById("adminSummarySyncStatus").textContent = "Ошибка";
+          document.getElementById("adminSummarySourceNote").textContent = error.message || "Не удалось загрузить сводку";
+          throw error;
+        }).finally(function () { if (button) button.disabled = false; });
+      }
+      function saveAdminSummaryMonth() {
+        var row = {
+          month:document.getElementById("adminSummaryMonth").value,
+          advertisingCosts:Number(document.getElementById("adminSummaryAdvertisingCosts").value || 0),
+          payrollCosts:Number(document.getElementById("adminSummaryPayrollCosts").value || 0),
+          revenue:Number(document.getElementById("adminSummaryRevenue").value || 0),
+          barterRevenue:Number(document.getElementById("adminSummaryBarterRevenue").value || 0),
+          commercialRevenue:Number(document.getElementById("adminSummaryCommercialRevenue").value || 0)
+        };
+        var button = document.getElementById("saveAdminSummaryBtn");
+        button.disabled = true;
+        return apiFetch("/api/admin-summary",{method:"POST",headers:{"content-type":"application/json","x-nsl-role":role},body:JSON.stringify(row)}).then(function (response) {
+          if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось сохранить месяц"); });
+          return response.json();
+        }).then(function () { resetAdminSummaryForm(); return hydrateAdminSummary(); }).then(function () { showToast("Месяц сохранён в сводке CRM"); }).finally(function () { button.disabled = false; });
       }
       function metricState(value, target, warningShare) {
         if (value >= target) return "trend-up";
@@ -4060,12 +4188,13 @@
         else if (page === "placements") renderPlacementRecords();
         else if (page === "calendar") renderWeeklyExits();
         else if (page === "reports") { renderEvidenceReports(); renderManagerMetrics(); renderMonthlyPlanFact(); renderMonthlyControlSummary(); }
+        else if (page === "summary") renderAdminSummary(currentAdminSummary);
         else if (page === "kpi") { renderSalaryTable(); renderKpiBloggerRoster(); renderKpiReachPlan(); loadKpiFromData(); }
         else if (page === "team") renderEmployees();
       }
       function navigate(page) {
-        if ((page === "team" || page === "integrations" || page === "kpi" || page === "finance") && role !== "leader") {
-          showToast(page === "kpi" ? "KPI и зарплата доступны только администратору" : page === "finance" ? "Финансы доступны только администратору" : "Раздел доступен только руководителю");
+        if ((page === "team" || page === "integrations" || page === "kpi" || page === "finance" || page === "summary") && role !== "leader") {
+          showToast(page === "kpi" ? "KPI и зарплата доступны только администратору" : page === "finance" ? "Финансы доступны только администратору" : page === "summary" ? "Сводка доступна только администратору" : "Раздел доступен только руководителю");
           return;
         }
         document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
@@ -4077,6 +4206,7 @@
         document.getElementById("sidebar").classList.remove("open");
         document.getElementById("mobileOverlay").classList.remove("show");
         if (page === "finance") hydrateFinanceCenter();
+        if (page === "summary") hydrateAdminSummary().catch(function () {});
         if (page === "reports") hydrateEvidenceReports().catch(function () {});
         if (page === "kpi" && role === "leader") { hydrateKpiAdjustments().catch(function () {}); hydrateKpiMonthBloggers(document.getElementById("kpiMonthSelect").value || activeMonthKey()).catch(function () {}); }
         if (page === "placements") placementPage = 1;
@@ -4108,8 +4238,8 @@
           document.getElementById("managerMetricsFilter").value = "all";
           renderManagerMetrics();
         }
-        if (role !== "leader" && (document.getElementById("page-team").classList.contains("active") || document.getElementById("page-integrations").classList.contains("active") || document.getElementById("page-kpi").classList.contains("active") || document.getElementById("page-finance").classList.contains("active"))) navigate("dashboard");
-        if (role === "leader") { renderEmployees(); renderSalaryTable(); loadKpiFromData(); hydrateKpiAdjustments().catch(function () {}); hydrateKpiMonthBloggers(activeMonthKey()).catch(function () {}); if (!currentFinanceData) hydrateFinanceCenter(); }
+        if (role !== "leader" && (document.getElementById("page-team").classList.contains("active") || document.getElementById("page-integrations").classList.contains("active") || document.getElementById("page-kpi").classList.contains("active") || document.getElementById("page-finance").classList.contains("active") || document.getElementById("page-summary").classList.contains("active"))) navigate("dashboard");
+        if (role === "leader") { renderEmployees(); renderSalaryTable(); loadKpiFromData(); hydrateKpiAdjustments().catch(function () {}); hydrateKpiMonthBloggers(activeMonthKey()).catch(function () {}); if (!currentFinanceData) hydrateFinanceCenter(); if (!(currentAdminSummary.rows || []).length) hydrateAdminSummary().catch(function () {}); }
         else { document.getElementById("teamGrid").innerHTML = ""; document.getElementById("salaryTable").innerHTML = ""; renderFinanceKpis(null); }
         renderMonthlyPlanFact();
         renderDepartmentMonthControl();
@@ -4137,7 +4267,7 @@
           appShell.classList.remove("hidden");
           return hydrateSharedState({full:true}).then(function () {
             var tasks = [hydrateReachActuals(),hydrateDepartmentMonths(),hydrateEmployees(),hydratePlacementSchedules(),hydrateEvidenceReports(),hydrateFinanceCenter()];
-            if (appRole === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(systemMonthKey()));
+            if (appRole === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(systemMonthKey()),hydrateAdminSummary());
             return Promise.allSettled(tasks);
           }).then(function (results) {
             try { setRole(appRole); }
@@ -4198,6 +4328,10 @@
         supabaseClient.auth.signOut().finally(function () { currentSession = null; appShell.classList.add("hidden"); loginScreen.classList.remove("hidden"); });
       });
       document.querySelectorAll(".nav-btn").forEach(function (b) { b.addEventListener("click", function () { if (b.dataset.page === "profile") employeeProfileTargetId = ""; navigate(b.dataset.page); }); });
+      document.getElementById("refreshAdminSummaryBtn").addEventListener("click",function () { hydrateAdminSummary().then(function () { showToast("Сводка обновлена"); }).catch(function (error) { showToast(error.message || "Не удалось обновить сводку"); }); });
+      document.getElementById("resetAdminSummaryBtn").addEventListener("click",resetAdminSummaryForm);
+      document.getElementById("adminSummaryForm").addEventListener("submit",function (event) { event.preventDefault(); if (role !== "leader") return showToast("Сводка доступна только администратору"); saveAdminSummaryMonth().catch(function (error) { showToast(error.message || "Не удалось сохранить месяц"); }); });
+      document.getElementById("adminSummaryTable").addEventListener("click",function (event) { var button = event.target.closest("[data-edit-admin-summary]"); if (button) editAdminSummaryMonth(button.dataset.editAdminSummary); });
       document.getElementById("backToTeamBtn").addEventListener("click",function () { employeeProfileTargetId = ""; navigate("team"); });
       document.getElementById("employeeProfileMonthFilter").addEventListener("change",renderEmployeeProfile);
       document.querySelectorAll(".mobile-nav-btn").forEach(function (b) { b.addEventListener("click", function () { navigate(b.dataset.mobilePage); }); });
@@ -5057,6 +5191,7 @@
       var initialToday = localTodayIso();
       ["managerDailyDateFilter","reportDate","assistantReportDate","evidenceDate","newPlacementDate"].forEach(function (id) { var input = document.getElementById(id); if (input) input.value = initialToday; });
       document.getElementById("managerMonthlyPlanFilter").value = activeMonthKey();
+      resetAdminSummaryForm();
       if (sharedStateChannel) sharedStateChannel.addEventListener("message",function (event) { if (event.data && event.data.type === "changed") hydrateSharedState({full:true}).catch(function () {}); });
       initializeImportedData(); syncBloggerEditControls(); refreshStaffSelectors(); populateKpiControls(); refreshBloggerCounters(); renderCurrentPageData(); renderAcceptanceStatus(); renderDataHealth();
       if (registrationInviteToken) {
@@ -5085,6 +5220,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=105",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=106",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

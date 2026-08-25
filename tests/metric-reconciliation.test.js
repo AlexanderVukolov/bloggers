@@ -4,12 +4,25 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(require("node:path").join(__dirname,"..","app-bundle-v88.js"),"utf8");
+const apiSource = fs.readFileSync(require("node:path").join(__dirname,"..","supabase","functions","bloggers-api","index.ts"),"utf8");
 
 test("login remains compatible with existing eight-character passwords",() => {
   assert.match(source,/passwordInput\.minLength = 8/);
   assert.match(source,/password\.length < 8/);
   assert.doesNotMatch(source,/password\.length < 12/);
   assert.match(source,/Минимум 8 символов/);
+});
+
+test("admin summary is protected and supports automatic months plus manual overrides",() => {
+  assert.match(source,/data-page="summary"/);
+  assert.match(source,/page === "summary"\) && role !== "leader"/);
+  assert.match(source,/apiFetch\("\/api\/admin-summary"/);
+  assert.match(source,/data-edit-admin-summary/);
+  assert.match(apiSource,/path === "\/api\/admin-summary"/);
+  assert.match(apiSource,/role !== "leader"/);
+  assert.match(apiSource,/range=A1:H1000/);
+  assert.match(apiSource,/adminSummaryManualNamespace/);
+  assert.match(apiSource,/manualRows\.forEach\(\(row: any\) => \{ merged\[row\.month\] = row; \}\)/);
 });
 
 function extractFunction(name) {
@@ -296,6 +309,7 @@ test("guaranteed reach on dashboard is the exact sum of canonical exit rows",() 
 
   context.canonicalMonthlyExitFact = () => ({guaranteed:11350});
   context.monthlyExitGuarantee = () => 560000;
+  context.applyOfficialDirectionMetrics = item => item;
   const managerFact = runFunction("monthlyManagerFact",context);
   const directionFact = runFunction("monthlyDirectionFact",context);
   assert.equal(managerFact("Manager A","2026-08").guaranteed,560000);
@@ -304,7 +318,7 @@ test("guaranteed reach on dashboard is the exact sum of canonical exit rows",() 
 
 test("all roles hydrate official Google Sheets metrics",() => {
   assert.match(source,/hydrateEvidenceReports\(\),hydrateFinanceCenter\(\)/);
-  assert.match(source,/var fields = \["clicks","leads","sales","revenue"\]/);
+  assert.match(source,/var fields = \["exits","reach","clicks","leads","sales","revenue"\]/);
 });
 
 test("deleted employees disappear from active CRM while work history remains",() => {
@@ -329,7 +343,7 @@ test("deleted employees disappear from active CRM while work history remains",()
     dailyAssistantReports:{"2026-08-10":{"Deleted Assistant":{fact:5,approvals:1}}},
   });
   assert.deepEqual(JSON.parse(JSON.stringify(activity("2026-08"))),{
-    outreach:15,exits:3,reach:1500,approvals:3,transferred:0,source:"Общая сводка отдела",
+    outreach:15,exits:3,reach:1500,approvals:3,transferred:0,source:"ЛН + FIT PRO · единый факт из таблиц",
   });
 
   assert.match(source,/var visibleEmployees = activeSalaryEmployees\(\)/);
