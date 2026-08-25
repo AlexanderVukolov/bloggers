@@ -47,6 +47,14 @@
     salarySummary.insertAdjacentHTML("afterend", '<article class="card card-pad" id="salaryPolicyCard" style="margin-bottom:16px"><div class="card-title"><div><h3>Правила начисления</h3><p>Категория определяется по охвату нового блогера; на границе 3000 начинается B, на границе 5000 — C</p></div><span class="badge badge-green">Считается автоматически</span></div><div class="grid grid-2"><div class="quality-item"><div><strong>Менеджеры · KPI за блогеров</strong><small>A: 1 000–2 999 — 500 ₽ · B: 3 000–4 999 — 2 700 ₽ · C: от 5 000 — 5 000 ₽</small></div></div><div class="quality-item"><div><strong>Ассистенты · KPI за блогеров</strong><small>A: 1 000–2 999 — 250 ₽ · B: 3 000–4 999 — 1 350 ₽ · C: от 5 000 — 2 500 ₽</small></div></div><div class="quality-item" style="grid-column:1/-1"><div><strong>Менеджеры · KPI за выполнение плана охвата</strong><small>70–79,99% — 6 000 ₽ · 80–89,99% — 10 000 ₽ · 90–99,99% — 15 000 ₽ · 100% и выше — 20 000 ₽</small></div></div></div></article>');
   }
 
+  var monthlySummarySwitch = document.getElementById("reportViewSwitch");
+  if (monthlySummarySwitch && !monthlySummarySwitch.querySelector('[data-report-view="summary"]')) {
+    var dailySummaryButton = monthlySummarySwitch.querySelector('[data-report-view="daily"]');
+    if (dailySummaryButton) dailySummaryButton.insertAdjacentHTML("afterend", '<button class="segment" data-report-view="summary">Сводка за месяц</button>');
+    var dailySummaryView = document.getElementById("report-view-daily");
+    if (dailySummaryView) dailySummaryView.insertAdjacentHTML("afterend", '<div class="report-view hidden" id="report-view-summary"><div class="report-section-head"><div><h3>Месячная сводка</h3><p>Ежедневные отчёты и результаты размещений за выбранный месяц</p></div><div class="actions"><input class="input" id="monthlyControlMonth" type="month" style="width:auto"><select class="select" id="monthlyControlEmployee" style="width:auto"><option value="all">Все сотрудники</option></select><span class="badge badge-green" id="monthlyControlPeriod">Текущий месяц</span></div></div><div class="grid manager-kpis" id="monthlyControlKpis"></div><div class="report-section-head"><div><h3>Сотрудники</h3><p>Менеджеры и ассистенты в одной месячной сводке</p></div></div><div class="card table-card"><div class="table-wrap"><table style="min-width:1840px"><thead><tr><th>Сотрудник</th><th>Роль</th><th>Дней с отчётом</th><th>План / факт рассылок</th><th>Ответы</th><th>Согласия</th><th>Новые блогеры</th><th>Передано менеджеру</th><th>Выходы</th><th>Гарант</th><th>Факт охвата</th><th>% плана охвата</th><th>Клики</th><th>Продажи</th><th>Выручка</th></tr></thead><tbody id="monthlyControlTable"></tbody></table></div><div class="table-note">Дневные показатели суммируются из сохранённых отчётов. Выходы, гарант, охват, клики, продажи и выручка берутся из единого реестра размещений. Данные удалённых сотрудников остаются в истории.</div></div></div>');
+  }
+
   var contractDateAnchor = document.getElementById("employeeBaseSalary");
   if (contractDateAnchor && !document.getElementById("employeeContractDate")) {
     contractDateAnchor.closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label>Дата договора оказания услуг</label><input class="input" id="employeeContractDate" type="date"></div>');
@@ -1081,6 +1089,105 @@
         if (role !== "leader") return '<b>' + (field === "revenue" ? money(value) : number(value)) + '</b>';
         return '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + Number(value || 0) + '" data-monthly-plan="' + safeText(manager) + '" data-monthly-month="' + month + '" data-monthly-field="' + field + '">';
       }
+      function monthlyControlNames(month,kind) {
+        var names = [];
+        function add(name) {
+          name = String(name || "").trim();
+          if (name && names.indexOf(name) < 0) names.push(name);
+        }
+        (kind === "manager" ? activeEmployeeManagers() : activeEmployeeAssistants()).forEach(add);
+        reportedEmployeeNamesForMonth(kind === "manager" ? dailyManagerReports : dailyAssistantReports,month).forEach(add);
+        if (kind === "manager") synchronizedPlacementRecords().forEach(function (item) {
+          if (monthFromDateValue(placementIsoDate(item) || item.sortDate || item.start) === month) add(item.manager);
+        });
+        return names.sort(function (a,b) { return a.localeCompare(b,"ru"); });
+      }
+      function monthlyControlDaily(name,month,kind) {
+        var source = kind === "manager" ? dailyManagerReports : dailyAssistantReports;
+        var result = {days:0,plan:0,fact:0,replies:0,approvals:0,transferred:0};
+        Object.keys(source).filter(function (date) { return date.slice(0,7) === month; }).forEach(function (date) {
+          var item = employeeNamedRecord(source[date] || {},name);
+          if (!item) return;
+          result.days += 1;
+          result.plan += Math.max(0,Number(kind === "manager" ? item.planOutreach : item.plan || 0));
+          result.fact += Math.max(0,Number(kind === "manager" ? item.outreach : item.fact || 0));
+          result.replies += Math.max(0,Number(item.replies || 0));
+          result.approvals += Math.max(0,Number(item.approvals || 0));
+          result.transferred += Math.max(0,Number(item.transferred || 0));
+        });
+        if (kind === "manager" && result.days && !result.plan) result.plan = result.days * Number(employeeMetricRecord(name).planOutreach || 150);
+        result.newBloggers = newBloggersForMonth(month).filter(function (blogger) {
+          return kind === "manager"
+            ? employeeNameMatches(name,blogger.manager) || employeeNameMatches(name,blogger.createdByName)
+            : blogger.createdByRole === "assistant" && employeeNameMatches(name,blogger.createdByName);
+        }).length;
+        return result;
+      }
+      function renderMonthlyControlSummary() {
+        var monthInput = document.getElementById("monthlyControlMonth");
+        var employeeSelect = document.getElementById("monthlyControlEmployee");
+        if (!monthInput || !employeeSelect) return;
+        var month = /^\d{4}-\d{2}$/.test(monthInput.value) ? monthInput.value : activeMonthKey();
+        monthInput.value = month;
+        document.getElementById("monthlyControlPeriod").textContent = activeMonthLabel(month);
+        var managers = monthlyControlNames(month,"manager");
+        var assistants = monthlyControlNames(month,"assistant");
+        var previous = employeeSelect.value || "all";
+        employeeSelect.innerHTML = '<option value="all">Все сотрудники</option>' +
+          managers.map(function (name) { return '<option value="m|' + safeText(name) + '">Менеджер · ' + safeText(name) + '</option>'; }).join("") +
+          assistants.map(function (name) { return '<option value="a|' + safeText(name) + '">Ассистент · ' + safeText(name) + '</option>'; }).join("");
+        var optionExists = Array.prototype.some.call(employeeSelect.options,function (option) { return option.value === previous; });
+        employeeSelect.value = optionExists ? previous : "all";
+        var selected = employeeSelect.value;
+        var selectedKind = selected.slice(0,1);
+        var selectedName = selected.length > 2 ? selected.slice(2) : "";
+        var rows = [];
+        managers.forEach(function (name) {
+          if (selected !== "all" && !(selectedKind === "m" && selectedName === name)) return;
+          var daily = monthlyControlDaily(name,month,"manager");
+          var fact = monthlyManagerFact(name,month);
+          var plan = monthlyPlanSetting(name,month);
+          rows.push({name:name,kind:"manager",daily:daily,fact:fact,plan:plan});
+        });
+        assistants.forEach(function (name) {
+          if (selected !== "all" && !(selectedKind === "a" && selectedName === name)) return;
+          rows.push({name:name,kind:"assistant",daily:monthlyControlDaily(name,month,"assistant"),fact:{exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0},plan:{reach:0}});
+        });
+
+        var communication = rows.reduce(function (total,row) {
+          ["plan","fact","replies","approvals","newBloggers"].forEach(function (field) { total[field] += Number(row.daily[field] || 0); });
+          return total;
+        },{plan:0,fact:0,replies:0,approvals:0,newBloggers:0});
+        var placement;
+        if (selected === "all") {
+          placement = ["ЛН","FIT PRO"].map(function (direction) { return applyOfficialDirectionMetrics(monthlyDirectionFact(month,direction),month); }).reduce(function (total,item) {
+            ["exits","guaranteed","reach","clicks","sales","revenue"].forEach(function (field) { total[field] += Number(item[field] || 0); });
+            return total;
+          },{exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0});
+        } else {
+          placement = rows.length && rows[0].kind === "manager" ? rows[0].fact : {exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0};
+        }
+        var cards = [
+          ["Рассылки за месяц",number(communication.fact),"план " + number(communication.plan),rate(communication.fact,communication.plan),"↗"],
+          ["Ответы",number(communication.replies),percent(rate(communication.replies,communication.fact),1) + " от рассылок",rate(communication.replies,communication.fact),"◎"],
+          ["Согласия",number(communication.approvals),percent(rate(communication.approvals,communication.replies),1) + " от ответов",rate(communication.approvals,communication.replies),"✓"],
+          ["Новые блогеры",number(communication.newBloggers),"добавлены за месяц",communication.newBloggers ? 100 : 0,"＋"],
+          ["Выходы за месяц",number(placement.exits),"подтверждённые размещения",placement.exits ? 100 : 0,"▶"],
+          ["Гарант охвата",number(placement.guaranteed),"из выходов",rate(placement.reach,placement.guaranteed),"◌"],
+          ["Фактический охват",number(placement.reach),number(placement.clicks) + " кликов",rate(placement.reach,placement.guaranteed),"◉"],
+          ["Выручка",money(placement.revenue),number(placement.sales) + " продаж",placement.revenue ? 100 : 0,"₽"]
+        ];
+        document.getElementById("monthlyControlKpis").innerHTML = cards.map(function (card) {
+          return '<article class="card kpi"><div class="kpi-top"><span>' + card[0] + '</span><span class="kpi-icon">' + card[4] + '</span></div><div class="kpi-value">' + card[1] + '</div><div class="kpi-foot"><span class="' + metricState(card[3],100) + '">' + percent(card[3],1) + '</span> · ' + card[2] + '</div><div class="plan-row"><div><span>Месяц</span><span>' + Math.min(100,Math.round(card[3] || 0)) + '%</span></div><div class="progress"><i style="width:' + Math.min(100,card[3] || 0) + '%"></i></div></div></article>';
+        }).join("");
+        document.getElementById("monthlyControlTable").innerHTML = rows.map(function (row) {
+          var daily = row.daily, fact = row.fact, plan = row.plan;
+          var reachPct = rate(fact.reach,plan.reach);
+          var historical = employeeByName(row.name) ? "Активный сотрудник" : "Исторические данные";
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(row.name) + '</div><div><strong>' + safeText(row.name) + '</strong><small>' + historical + '</small></div></div></td><td><span class="badge ' + (row.kind === "manager" ? "badge-blue" : "badge-purple") + '">' + (row.kind === "manager" ? "Менеджер" : "Ассистент") + '</span></td><td><b>' + number(daily.days) + '</b></td><td><b>' + number(daily.plan) + ' / ' + number(daily.fact) + '</b></td><td>' + number(daily.replies) + '</td><td>' + number(daily.approvals) + '</td><td><b>' + number(daily.newBloggers) + '</b></td><td>' + number(daily.transferred) + '</td><td><b>' + number(fact.exits) + '</b></td><td>' + number(fact.guaranteed) + '</td><td><b>' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + number(fact.clicks) + '</td><td>' + number(fact.sales) + '</td><td><b>' + money(fact.revenue) + '</b></td></tr>';
+        }).join("") || '<tr><td colspan="15"><div class="empty-state">За выбранный месяц данных нет.</div></td></tr>';
+      }
+
       function renderMonthlyPlanFact() {
         var month = document.getElementById("managerMonthlyPlanFilter").value || "2026-07";
         var filter = document.getElementById("managerMetricsFilter").value;
@@ -3863,6 +3970,7 @@
         if (!target) return;
         document.querySelectorAll("#reportViewSwitch .segment").forEach(function (button) { button.classList.toggle("active",button.dataset.reportView === view); });
         document.querySelectorAll(".report-view").forEach(function (item) { item.classList.toggle("hidden",item !== target); });
+        if (view === "summary") renderMonthlyControlSummary();
       }
       function renderBloggerHistory(blogger) {
         var rows = placementRowsForBlogger(blogger);
@@ -3888,7 +3996,7 @@
         else if (page === "bloggers") { renderBloggers(); renderNewBloggersMonth(); }
         else if (page === "placements") renderPlacementRecords();
         else if (page === "calendar") renderWeeklyExits();
-        else if (page === "reports") { renderEvidenceReports(); renderManagerMetrics(); renderMonthlyPlanFact(); }
+        else if (page === "reports") { renderEvidenceReports(); renderManagerMetrics(); renderMonthlyPlanFact(); renderMonthlyControlSummary(); }
         else if (page === "kpi") { renderSalaryTable(); renderKpiBloggerRoster(); renderKpiReachPlan(); loadKpiFromData(); }
         else if (page === "team") renderEmployees();
       }
@@ -4358,6 +4466,8 @@
       document.getElementById("managerMetricsFilter").addEventListener("change", renderManagerMetrics);
       document.getElementById("evidenceEmployeeFilter").addEventListener("change", renderEvidenceReports);
       document.getElementById("managerDailyDateFilter").addEventListener("change", renderManagerMetrics);
+      document.getElementById("monthlyControlMonth").addEventListener("change", renderMonthlyControlSummary);
+      document.getElementById("monthlyControlEmployee").addEventListener("change", renderMonthlyControlSummary);
       document.getElementById("fillAssistantReportBtn").addEventListener("click", function () {
         if (!canEditDailyReports()) return showToast("У вашей роли нет права заполнять ежедневный отчёт");
         document.getElementById("assistantReportDate").value = document.getElementById("managerDailyDateFilter").value || localTodayIso();
@@ -4912,6 +5022,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=100",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=101",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
