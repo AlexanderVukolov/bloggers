@@ -306,3 +306,34 @@ test("all roles hydrate official Google Sheets metrics",() => {
   assert.match(source,/hydrateEvidenceReports\(\),hydrateFinanceCenter\(\)/);
   assert.match(source,/var fields = \["clicks","leads","sales","revenue"\]/);
 });
+
+test("deleted employees disappear from active CRM while work history remains",() => {
+  const activeOnly = runFunction("activeSalaryEmployees",{
+    employees:[
+      {id:"active",name:"Active",status:"active"},
+      {id:"deleted",name:"Deleted",status:"paused"},
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(activeOnly())),[{id:"active",name:"Active",status:"active"}]);
+
+  const reportedNames = runFunction("reportedEmployeeNamesForMonth",{Object});
+  assert.deepEqual(JSON.parse(JSON.stringify(reportedNames({
+    "2026-08-10":{"Deleted Manager":{outreach:10}},
+    "2026-07-10":{"Old Month":{outreach:99}},
+  },"2026-08"))),["Deleted Manager"]);
+
+  const activity = runFunction("leaderMonthActivity",{
+    Object,Number,
+    monthlyDirectionFact:(month,direction) => direction === "ЛН" ? {exits:2,reach:1000} : {exits:1,reach:500},
+    dailyManagerReports:{"2026-08-10":{"Deleted Manager":{outreach:10,approvals:2}}},
+    dailyAssistantReports:{"2026-08-10":{"Deleted Assistant":{fact:5,approvals:1}}},
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(activity("2026-08"))),{
+    outreach:15,exits:3,reach:1500,approvals:3,transferred:0,source:"Общая сводка отдела",
+  });
+
+  assert.match(source,/var visibleEmployees = activeSalaryEmployees\(\)/);
+  assert.doesNotMatch(source,/grid\.innerHTML = employees\.map/);
+  assert.match(source,/data\.employee \|\| employee,\{status:"paused",accessStatus:"revoked"\}/);
+  assert.match(source,/история работы сохранена/);
+});

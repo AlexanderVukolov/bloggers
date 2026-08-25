@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v98-sheet-clicks";
+const CACHE_NAME = "nsl-bloggers-github-v99-employee-archive";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,

@@ -1243,6 +1243,15 @@
           return total;
         },{dayPlan:Number(daily.planOutreach || metricRecord.planOutreach || 150),dayFact:Number(daily.outreach || 0),monthPlan:0,monthFact:0});
       }
+      function reportedEmployeeNamesForMonth(reportMap,month) {
+        var found = {};
+        Object.keys(reportMap || {}).filter(function (date) { return date.slice(0,7) === month; }).forEach(function (date) {
+          Object.keys(reportMap[date] || {}).forEach(function (name) {
+            if (name && name.indexOf("__") !== 0) found[name] = true;
+          });
+        });
+        return Object.keys(found).sort(function (a,b) { return a.localeCompare(b,"ru"); });
+      }
       function assistantOutreachNames(month) {
         return activeEmployeeAssistants();
       }
@@ -1375,6 +1384,20 @@
           var dailyOutreachPct = rate(outreach.dayFact,outreach.dayPlan);
           var monthOutreachPct = rate(outreach.monthFact,outreach.monthPlan);
           return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(manager) + '</div><div><strong>' + safeText(manager) + '</strong><small>Действующий месяц</small></div></div></td><td><b>' + number(outreach.dayPlan) + ' / ' + number(outreach.dayFact) + '</b><small style="display:block" class="' + metricState(dailyOutreachPct,100) + '">' + percent(dailyOutreachPct,1) + '</small></td><td><b>' + number(outreach.monthPlan) + ' / ' + number(outreach.monthFact) + '</b><small style="display:block" class="' + metricState(monthOutreachPct,100) + '">' + percent(monthOutreachPct,1) + '</small></td><td><b>' + number(plan.exits) + ' / ' + number(fact.exits) + '</b></td><td>' + number(plan.reach) + ' / <b>' + number(fact.reach) + '</b></td><td><b>' + number(fact.guaranteed) + ' / ' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + money(plan.revenue) + ' / <b>' + money(fact.revenue) + '</b></td><td><span class="' + metricState(revenuePct,100) + '">' + percent(revenuePct,1) + '</span></td></tr>';
+        });
+        reportedEmployeeNamesForMonth(dailyManagerReports,month).filter(function (name) {
+          return !managers.some(function (activeName) { return employeeNameMatches(activeName,name); });
+        }).forEach(function (name) {
+          var outreach = managerOutreachSummary(name,month,selectedDate);
+          totals.dayOutreachPlan += outreach.dayPlan; totals.dayOutreachFact += outreach.dayFact;
+          totals.monthOutreachPlan += outreach.monthPlan; totals.monthOutreachFact += outreach.monthFact;
+        });
+        reportedEmployeeNamesForMonth(dailyAssistantReports,month).filter(function (name) {
+          return !assistantNames.some(function (activeName) { return employeeNameMatches(activeName,name); });
+        }).forEach(function (name) {
+          var outreach = assistantOutreachSummary(name,month,selectedDate);
+          totals.dayOutreachPlan += outreach.dayPlan; totals.dayOutreachFact += outreach.dayFact;
+          totals.monthOutreachPlan += outreach.monthPlan; totals.monthOutreachFact += outreach.monthFact;
         });
         var directionFacts = [monthlyDirectionFact(month,"ЛН"),monthlyDirectionFact(month,"FIT PRO")];
         var departmentPlan = monthlyDepartmentPlanSetting(month);
@@ -2673,7 +2696,8 @@
         var month = activeMonthKey();
         var monthLabel = activeMonthLabel(month);
         var latestDate = dashboardReportDates(month)[0] || new Date().toISOString().slice(0,10);
-        grid.innerHTML = employees.map(function (employee) {
+        var visibleEmployees = activeSalaryEmployees();
+        grid.innerHTML = visibleEmployees.map(function (employee) {
           var stats = [];
           var salary = effectiveEmployeeBaseSalary(employee);
           if (employee.role === "manager") {
@@ -2688,7 +2712,7 @@
           } else if (employee.role === "analyst") {
             stats = [["Отчёты","доступ"],["Дашборды","доступ"],["Просмотр","режим"]];
           } else {
-            stats = [[employees.length,"сотрудников"],["Все","разделы"],["Полный","доступ"]];
+            stats = [[visibleEmployees.length,"сотрудников"],["Все","разделы"],["Полный","доступ"]];
           }
           var statusLabel = employee.status === "paused" ? "Приостановлен" : "Активен";
           var statusClass = employee.status === "paused" ? "badge-red" : "badge-green";
@@ -4766,15 +4790,18 @@
       document.getElementById("removeEmployeeBtn").addEventListener("click",function () {
         var employeeId = document.getElementById("employeeId").value;
         var employee = employees.find(function (item) { return item.id === employeeId; });
-        if (!employee || !window.confirm("Убрать " + employee.name + " из активной команды? История и отчёты сохранятся.")) return;
+        if (!employee || !window.confirm("Удалить " + employee.name + " из CRM? Кабинет и доступ будут отключены, сотрудник исчезнет из активных списков. Вся история его работы и статистика сохранятся.")) return;
         var button = document.getElementById("removeEmployeeBtn");
         button.disabled = true;
         removeEmployeeAccess(employee.id).then(function (data) {
+          var archived = Object.assign({},data.employee || employee,{status:"paused",accessStatus:"revoked"});
           var index = employees.findIndex(function (item) { return item.id === employee.id; });
-          if (index >= 0) employees[index] = data.employee;
-          cacheEmployees(); refreshStaffSelectors(); renderEmployees(); renderSalaryTable(); closeLayers();
-          showToast("Сотрудник убран из активной команды, история сохранена");
-        }).catch(function (error) { showToast(error.message || "Не удалось убрать сотрудника"); }).finally(function () { button.disabled = false; });
+          if (index >= 0) employees[index] = archived;
+          cacheEmployees();
+          closeLayers();
+          refreshAllDerivedViews();
+          showToast("Сотрудник удалён из активной CRM, история работы сохранена");
+        }).catch(function (error) { showToast(error.message || "Не удалось удалить сотрудника"); }).finally(function () { button.disabled = false; });
       });
       document.getElementById("copyEmployeeAccessBtn").addEventListener("click",function () {
         var input = document.getElementById("employeeAccessLink");
@@ -4847,6 +4874,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=98",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=99",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
