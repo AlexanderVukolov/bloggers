@@ -534,6 +534,8 @@
             renderKpis();
             renderDashboardMonthSummary();
           }
+          var profilePage = document.getElementById("page-profile");
+          if (profilePage && profilePage.classList.contains("active")) renderEmployeeProfile();
           return data;
         }).catch(function () {
           currentFinanceData = null;
@@ -1432,7 +1434,10 @@
           item[field] = value;
           applied.push(field === "reach" ? "фактический охват" : field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
         });
-        if (applied.length) item.source = String(item.source || "Выходы") + " · Google Sheets: " + applied.join(", ");
+        if (applied.length) {
+          var baseSource = String(item.source || "Выходы").replace(/ · Google Sheets:.*$/,"");
+          item.source = baseSource + " · Google Sheets: " + applied.join(", ");
+        }
         return item;
       }
       function renderDepartmentOutreachPlanEditor(month) {
@@ -1465,7 +1470,7 @@
       function monthlyDirectionFact(month,direction) {
         var result = canonicalMonthlyExitFact(month,{direction:direction});
         result.guaranteed = monthlyExitGuarantee(month,direction);
-        return result;
+        return applyOfficialDirectionMetrics(result,month);
       }
       function dashboardDirectionCard(item,month) {
         var isLn = item.direction === "ЛН";
@@ -2905,7 +2910,7 @@
             approvals += Number(report.approvals || 0);
           });
         });
-        return {outreach:outreach,exits:totals.exits,reach:totals.reach,approvals:approvals,transferred:0,source:"Общая сводка отдела"};
+        return {outreach:outreach,exits:totals.exits,reach:totals.reach,approvals:approvals,transferred:0,source:"ЛН + FIT PRO · единый факт из таблиц"};
       }
       function employeeMonthActivity(employee,month) {
         if (employee.role === "manager") return managerMonthActivity(employee,month);
@@ -5040,6 +5045,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=103",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=104",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
