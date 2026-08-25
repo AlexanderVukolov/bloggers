@@ -345,8 +345,6 @@
         (data.archive || []).concat(data.current ? [data.current] : []).forEach(function (entry) {
           if (!entry || !entry.month) return;
           var directions = entry.directions || {};
-          var lnCost = programDirectionCostMetric(entry.month,"ЛН");
-          var fitCost = programDirectionCostMetric(entry.month,"FIT PRO");
           var lnFact = monthlyDirectionFact(entry.month,"ЛН");
           var fitFact = monthlyDirectionFact(entry.month,"FIT PRO");
           function metricFact(metrics,id) {
@@ -366,7 +364,7 @@
             var marketingCosts = paidBudget > 0 ? paidBudget : costs;
             setMetricFact(metrics,"romi",marketingCosts > 0 && revenue != null ? (revenue - marketingCosts) / marketingCosts * 100 : null,"Выручка и маркетинговые затраты");
           }
-          function attachDirection(directionEntry,fact,costFallback,directionName) {
+          function attachDirection(directionEntry,fact,directionName) {
             if (!directionEntry) return;
             var metrics = directionEntry.metrics || (directionEntry.metrics = {});
             metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
@@ -376,13 +374,12 @@
               var value = officialDirectionOverrideMetric(entry.month,directionName,id);
               if (value != null) setMetricFact(metrics,id,value,"Подтверждённый факт");
             });
-            var placementCosts = Number(costFallback && costFallback.fact || 0);
-            if (Number.isFinite(placementCosts) && placementCosts > 0) setMetricFact(metrics,"costs",placementCosts,"Размещения · фактические затраты");
-            else if (metricFact(metrics,"costs") == null) setMetricFact(metrics,"costs",0,"Размещения · затраты не указаны");
+            var sheetCosts = metricFact(metrics,"costs");
+            setMetricFact(metrics,"costs",sheetCosts,"@СОТ | ОМ | Отчет по блогерам · " + (directionName === "FIT PRO" ? "Отчет FIT PRO" : "Отчет ЛН"));
             recalculateEfficiency(metrics);
           }
-          attachDirection(directions.ln,lnFact,lnCost,"ЛН");
-          attachDirection(directions.fit,fitFact,fitCost,"FIT PRO");
+          attachDirection(directions.ln,lnFact,"ЛН");
+          attachDirection(directions.fit,fitFact,"FIT PRO");
           if (entry.combined) {
             var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
             entry.combined.metrics.outreach = programOutreachMetric(entry.month);
@@ -399,8 +396,7 @@
               if (value != null) { sum.value += value; sum.found = true; }
               return sum;
             },{value:0,found:false});
-            if (directionCosts.found) setMetricFact(combinedMetrics,"costs",directionCosts.value,"Финансовая таблица · ЛН + FIT PRO");
-            else if (metricFact(combinedMetrics,"costs") == null) setMetricFact(combinedMetrics,"costs",Number(lnCost.fact || 0) + Number(fitCost.fact || 0),"Размещения · резервный источник");
+            setMetricFact(combinedMetrics,"costs",directionCosts.found ? directionCosts.value : null,"@СОТ | ОМ | Отчет по блогерам · ЛН + FIT PRO");
             recalculateEfficiency(combinedMetrics);
           }
         });
@@ -496,7 +492,7 @@
         var updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
         document.getElementById("financeSyncStatus").className = "badge " + (isFallback ? "badge-amber" : "badge-green");
         document.getElementById("financeSyncStatus").textContent = isFallback ? "Резервный снимок" : "Google Sheets · актуально";
-        document.getElementById("financeSourceNote").textContent = (isFallback ? "Показан последний сохранённый снимок. " : "Данные получены напрямую из Google Sheets. ") + "Листы: «Отчет ЛН» и «Отчет FIT PRO» · обновлено " + updated + ". Рассылки в сводной не удваиваются; общий ROI и ROMI пересчитываются по суммарной выручке и затратам.";
+        document.getElementById("financeSourceNote").textContent = (isFallback ? "Показан последний сохранённый снимок. " : "Данные получены напрямую из Google Sheets. ") + "Таблица «@СОТ | ОМ | Отчет по блогерам», листы «Отчет ЛН» и «Отчет FIT PRO» · обновлено " + updated + ". Затраты берутся только из строк «Затраты всего» / «Затраты» этих листов; общий ROI пересчитывается по суммарной выручке и затратам.";
         renderFinanceKpis(data);
         renderFinanceTrend(data);
         renderFinanceArchive(data.archive || []);
@@ -4835,6 +4831,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=96",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=97",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

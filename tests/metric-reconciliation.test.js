@@ -75,7 +75,7 @@ test("one blogger and date count as one exit while distinct formats add reach",(
   });
 });
 
-test("finance uses placement costs and recalculates direction and combined ROI",() => {
+test("finance uses only the two project sheets for costs and ROI",() => {
   const facts = {"ЛН":{exits:2,clicks:20},"FIT PRO":{exits:1,clicks:10}};
   const context = {
     Object,Number,String,Math,
@@ -83,8 +83,8 @@ test("finance uses placement costs and recalculates direction and combined ROI",
     managerOutreachSummary:() => ({monthPlan:0,monthFact:0}),assistantOutreachSummary:() => ({monthPlan:0,monthFact:0}),
     monthlyDepartmentPlanSetting:() => ({outreachMonth:9000}),
     synchronizedPlacementRecords:() => [
-      {direction:"ЛН",sortDate:"2026-08-10",cost:1200},
-      {direction:"FIT PRO",sortDate:"2026-08-11",cost:800},
+      {direction:"ЛН",sortDate:"2026-08-10",cost:999999},
+      {direction:"FIT PRO",sortDate:"2026-08-11",cost:888888},
     ],
     placementDirection:item => item.direction,monthFromDateValue:value => String(value || "").slice(0,7),bloggers:[],
     monthlyDirectionFact:(month,direction) => facts[direction],
@@ -94,23 +94,20 @@ test("finance uses placement costs and recalculates direction and combined ROI",
     vm.runInContext(extractFunction(name),context);
   });
   const data = {current:{month:"2026-08",directions:{
-    ln:{metrics:{sales:{fact:2},revenue:{fact:3000},costs:{fact:1000},paidBudget:{fact:500}}},
-    fit:{metrics:{sales:{fact:7},revenue:{fact:1000},costs:{fact:500},paidBudget:{fact:250}}},
-  },combined:{metrics:{sales:{fact:9},revenue:{fact:4000},costs:{fact:1500},paidBudget:{fact:750}}}}};
+    ln:{metrics:{sales:{fact:19},revenue:{fact:1012022},costs:{fact:360220},paidBudget:{fact:241840}}},
+    fit:{metrics:{sales:{fact:7},revenue:{fact:1000},costs:{fact:null},paidBudget:{fact:0}}},
+  },combined:{metrics:{sales:{fact:26},revenue:{fact:1013022},costs:{fact:360220},paidBudget:{fact:241840}}}}};
   context.attachProgramFinanceMetrics(data);
-  assert.equal(data.current.directions.ln.metrics.costs.fact,1200);
-  assert.equal(data.current.directions.ln.metrics.exits.fact,2);
-  assert.equal(data.current.directions.ln.metrics.roi.fact,(3000-1200)/1200*100);
-  assert.equal(data.current.directions.ln.metrics.romi.fact,500);
-  assert.equal(data.current.combined.metrics.exits.fact,3);
+  assert.equal(data.current.directions.ln.metrics.costs.fact,360220);
+  assert.equal(data.current.directions.ln.metrics.roi.fact,(1012022-360220)/360220*100);
   assert.equal(data.current.directions.fit.metrics.sales.fact,1);
   assert.equal(data.current.directions.fit.metrics.revenue.fact,39900);
-  assert.equal(data.current.directions.fit.metrics.costs.fact,800);
-  assert.equal(data.current.directions.fit.metrics.roi.fact,(39900-800)/800*100);
-  assert.equal(data.current.combined.metrics.sales.fact,3);
-  assert.equal(data.current.combined.metrics.revenue.fact,42900);
-  assert.equal(data.current.combined.metrics.costs.fact,2000);
-  assert.equal(data.current.combined.metrics.roi.fact,(42900-2000)/2000*100);
+  assert.equal(data.current.directions.fit.metrics.costs.fact,null);
+  assert.equal(data.current.directions.fit.metrics.roi.fact,null);
+  assert.equal(data.current.combined.metrics.sales.fact,20);
+  assert.equal(data.current.combined.metrics.revenue.fact,1051922);
+  assert.equal(data.current.combined.metrics.costs.fact,360220);
+  assert.equal(data.current.combined.metrics.roi.fact,(1051922-360220)/360220*100);
 });
 
 test("FIT PRO uses the confirmed August sale in every summary",() => {
