@@ -90,6 +90,11 @@
     </section>`);
   }
 
+  var financeMetricsTable = document.getElementById("financeMetricsTable");
+  if (financeMetricsTable && !document.getElementById("financeMonthEditor")) {
+    financeMetricsTable.closest(".table-wrap").insertAdjacentHTML("beforebegin", '<div class="finance-month-editor" id="financeMonthEditor"><div><strong>Рабочий месяц</strong><small>Редактирование доступно с августа 2026. Общий итог рассчитывается автоматически.</small></div><div class="actions"><input class="input" id="financeMonthSelect" type="month" min="2026-08" value="2026-08"><button class="btn btn-sm btn-outline" id="editFinanceSummaryBtn" type="button">✎ Редактировать</button><button class="btn btn-sm btn-primary hidden" id="saveFinanceSummaryBtn" type="button">Сохранить план и факт</button><button class="btn btn-sm btn-outline hidden" id="cancelFinanceSummaryBtn" type="button">Отмена</button></div></div><p class="evidence-note hidden" id="financeEditNote">Введите план и факт отдельно для ЛН и FIT PRO. Столбцы «Всего», ROI и ROMI пересчитаются после сохранения.</p>');
+  }
+
   var contractDateAnchor = document.getElementById("employeeBaseSalary");
   if (contractDateAnchor && !document.getElementById("employeeContractDate")) {
     contractDateAnchor.closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label>Дата договора оказания услуг</label><input class="input" id="employeeContractDate" type="date"></div>');
@@ -143,6 +148,8 @@
       var MAX_BLOGGER_REACH = 1000000000;
       var importedEugeniaStats = window.NSL_EUGENIA_STATS || {dailyReports:{},monthly:{}};
       var currentFinanceData = null;
+      var selectedFinanceMonth = systemMonthKey() >= "2026-08" ? systemMonthKey() : "2026-08";
+      var financeEditMode = false;
       var currentAdminSummary = {rows:[],source:null,updatedAt:""};
       var baseBloggers = importedData ? importedData.bloggers : [];
       var datasetVersion = importedData ? "google-sheets-" + importedData.meta.snapshot + "-" + importedData.meta.bloggers : "demo";
@@ -398,6 +405,7 @@
           }
           function setMetricFact(metrics,id,value,source) {
             var previous = metrics[id] || {};
+            if (previous.manual && id !== "roi" && id !== "romi") return;
             var plan = previous.plan == null ? null : Number(previous.plan);
             metrics[id] = {plan:plan,fact:value,progress:plan > 0 && value != null ? value / plan * 100 : null,source:source};
           }
@@ -412,7 +420,7 @@
           function attachDirection(directionEntry,fact,directionName) {
             if (!directionEntry) return;
             var metrics = directionEntry.metrics || (directionEntry.metrics = {});
-            metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
+            if (!metrics.outreach || !metrics.outreach.manual) metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
             var sheetExits = metricFact(metrics,"exits");
             setMetricFact(metrics,"exits",sheetExits != null ? sheetExits : Number(fact.exits || 0),sheetExits != null ? "@СОТ | ОМ | Отчет по блогерам · " + (directionName === "FIT PRO" ? "Отчет FIT PRO" : "Отчет ЛН") : "Главная · единый реестр выходов");
             var sheetClicks = metricFact(metrics,"clicks");
@@ -429,7 +437,7 @@
           attachDirection(directions.fit,fitFact,"FIT PRO");
           if (entry.combined) {
             var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
-            entry.combined.metrics.outreach = programOutreachMetric(entry.month);
+            if (!combinedMetrics.outreach || !combinedMetrics.outreach.manual) entry.combined.metrics.outreach = programOutreachMetric(entry.month);
             var directionExits = [directions.ln,directions.fit].reduce(function (sum,item) {
               var value = metricFact(item && item.metrics,"exits");
               if (value != null) { sum.value += value; sum.found = true; }
@@ -532,10 +540,43 @@
           return '<tr><td><b>' + activeMonthLabel(entry.month) + '</b></td><td><span class="badge ' + (directions.length > 1 ? 'badge-green' : 'badge-amber') + '">' + safeText(directions.join(" + ") || "Нет данных") + '</span></td><td>' + financeMetricValue("reach",metrics.reach && metrics.reach.fact) + '</td><td>' + financeMetricValue("leads",metrics.leads && metrics.leads.fact) + '</td><td>' + financeMetricValue("sales",metrics.sales && metrics.sales.fact) + '</td><td><b>' + financeMetricValue("revenue",metrics.revenue && metrics.revenue.fact) + '</b></td><td>' + financeMetricValue("exits",metrics.exits && metrics.exits.fact) + '</td><td>' + financeMetricValue("costs",metrics.costs && metrics.costs.fact) + '</td><td>' + financeMetricValue("roi",metrics.roi && metrics.roi.fact) + '</td><td>' + financeMetricValue("romi",metrics.romi && metrics.romi.fact) + '</td></tr>';
         }).join("") + '</tbody></table></div><div class="table-note">Прошлые месяцы участвуют в статистике архива и не смешиваются с показателями действующего месяца. Если направления нет в исходной таблице за месяц, оно не добавляется в итог.</div>';
       }
+      function financeAllEntries(data) {
+        var byMonth = {};
+        (data && data.archive || []).concat(data && data.current ? [data.current] : []).forEach(function (entry) { if (entry && entry.month) byMonth[entry.month] = entry; });
+        return Object.keys(byMonth).sort().reverse().map(function (month) { return byMonth[month]; });
+      }
+      function emptyFinanceEntry(month) {
+        function direction(key,title) { return {month:month,direction:key,title:title,metrics:{}}; }
+        return {month:month,directions:{ln:direction("ln","ЛН"),fit:direction("fit","FIT PRO")},combined:direction("all","Все направления"),availableDirections:["ln","fit"],manual:true};
+      }
+      function financeDisplayData(data) {
+        if (!data) return null;
+        var entries = financeAllEntries(data);
+        var month = selectedFinanceMonth >= "2026-08" ? selectedFinanceMonth : "2026-08";
+        var selected = entries.find(function (entry) { return entry.month === month; }) || emptyFinanceEntry(month);
+        return Object.assign({},data,{current:selected,archive:entries.filter(function (entry) { return entry.month !== month; })});
+      }
+      function financeEditableCell(meta,directionKey,field,metric) {
+        var value = metric && metric[field];
+        if (!financeEditMode || meta.id === "roi" || meta.id === "romi") return (field === "fact" ? '<b>' : '') + financeMetricValue(meta.id,value) + (field === "fact" ? '</b>' : '');
+        return '<input class="input finance-metric-input" type="number" min="0" max="100000000000" step="0.01" data-finance-direction="' + directionKey + '" data-finance-metric="' + meta.id + '" data-finance-field="' + field + '" value="' + (value == null ? '' : Number(value)) + '" aria-label="' + safeText(meta.label + " · " + directionKey + " · " + field) + '">';
+      }
+      function syncFinanceEditorControls(current) {
+        var monthInput = document.getElementById("financeMonthSelect");
+        if (monthInput) monthInput.value = selectedFinanceMonth;
+        document.getElementById("editFinanceSummaryBtn").classList.toggle("hidden",financeEditMode);
+        document.getElementById("saveFinanceSummaryBtn").classList.toggle("hidden",!financeEditMode);
+        document.getElementById("cancelFinanceSummaryBtn").classList.toggle("hidden",!financeEditMode);
+        document.getElementById("financeEditNote").classList.toggle("hidden",!financeEditMode);
+        if (monthInput) monthInput.disabled = financeEditMode;
+        var editButton = document.getElementById("editFinanceSummaryBtn");
+        editButton.textContent = current && current.manual ? "✎ Изменить данные CRM" : "✎ Редактировать";
+      }
       function renderFinanceCenter(data,isFallback) {
         if (role !== "leader" || !data || !data.current) return;
         currentFinanceData = data;
-        var current = data.current;
+        var displayData = financeDisplayData(data);
+        var current = displayData.current;
         var directions = current.directions || {};
         document.getElementById("financeCenterTitle").textContent = "Финансы и результат отдела · " + activeMonthLabel(current.month);
         document.getElementById("financeDirectionCards").innerHTML = financeDirectionCard(directions.ln,false) + financeDirectionCard(directions.fit,false) + financeDirectionCard(current.combined,true);
@@ -544,15 +585,43 @@
           var fit = directions.fit && directions.fit.metrics[meta.id];
           var total = current.combined && current.combined.metrics[meta.id];
           var progress = total && total.progress != null ? '<span class="' + financeProgressClass(meta.id,total) + '">' + percent(total.progress,1) + '</span>' : '<span class="trend-warn">Без плана</span>';
-          return '<tr><td><b>' + meta.label + '</b></td><td>' + financeMetricValue(meta.id,ln && ln.plan) + '</td><td><b>' + financeMetricValue(meta.id,ln && ln.fact) + '</b></td><td>' + financeMetricValue(meta.id,fit && fit.plan) + '</td><td><b>' + financeMetricValue(meta.id,fit && fit.fact) + '</b></td><td>' + financeMetricValue(meta.id,total && total.plan) + '</td><td><b>' + financeMetricValue(meta.id,total && total.fact) + '</b></td><td>' + progress + '</td></tr>';
+          var manualBadge = (ln && ln.manual) || (fit && fit.manual) ? '<small class="finance-manual-mark">CRM</small>' : '';
+          return '<tr><td><b>' + meta.label + '</b>' + manualBadge + '</td><td>' + financeEditableCell(meta,"ln","plan",ln) + '</td><td>' + financeEditableCell(meta,"ln","fact",ln) + '</td><td>' + financeEditableCell(meta,"fit","plan",fit) + '</td><td>' + financeEditableCell(meta,"fit","fact",fit) + '</td><td>' + financeMetricValue(meta.id,total && total.plan) + '</td><td><b>' + financeMetricValue(meta.id,total && total.fact) + '</b></td><td>' + progress + '</td></tr>';
         }).join("");
         var updated = data.updatedAt ? new Date(data.updatedAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
-        document.getElementById("financeSyncStatus").className = "badge " + (isFallback ? "badge-amber" : "badge-green");
-        document.getElementById("financeSyncStatus").textContent = isFallback ? "Резервный снимок" : "Google Sheets · актуально";
-        document.getElementById("financeSourceNote").textContent = (isFallback ? "Показан последний сохранённый снимок. " : "Данные получены напрямую из Google Sheets. ") + "Таблица «@СОТ | ОМ | Отчет по блогерам», листы «Отчет ЛН» и «Отчет FIT PRO» · обновлено " + updated + ". Затраты берутся только из строк «Затраты всего» / «Затраты» этих листов; общий ROI пересчитывается по суммарной выручке и затратам.";
-        renderFinanceKpis(data);
+        document.getElementById("financeSyncStatus").className = "badge " + (current.manual ? "badge-blue" : isFallback ? "badge-amber" : "badge-green");
+        document.getElementById("financeSyncStatus").textContent = current.manual ? "CRM · редактируемый месяц" : isFallback ? "Резервный снимок" : "Google Sheets · актуально";
+        document.getElementById("financeSourceNote").textContent = (current.manual ? "Для выбранного месяца применены значения администратора из CRM. " : isFallback ? "Показан последний сохранённый снимок. " : "Данные получены напрямую из Google Sheets. ") + "Таблица «@СОТ | ОМ | Отчет по блогерам», листы «Отчет ЛН» и «Отчет FIT PRO» · обновлено " + updated + ". Общий итог — сумма ЛН и FIT PRO; ROI рассчитывается по общей выручке и общим затратам, ROMI — по общей выручке и суммарному рекламному бюджету.";
+        syncFinanceEditorControls(current);
+        renderFinanceKpis(displayData);
         renderFinanceTrend(data);
-        renderFinanceArchive(data.archive || []);
+        renderFinanceArchive(displayData.archive || []);
+      }
+      function financeEditorPayload() {
+        var payload = {month:selectedFinanceMonth,directions:{ln:{},fit:{}}};
+        ["ln","fit"].forEach(function (direction) {
+          FINANCE_METRICS.filter(function (meta) { return meta.id !== "roi" && meta.id !== "romi"; }).forEach(function (meta) {
+            payload.directions[direction][meta.id] = {};
+            ["plan","fact"].forEach(function (field) {
+              var input = document.querySelector('[data-finance-direction="' + direction + '"][data-finance-metric="' + meta.id + '"][data-finance-field="' + field + '"]');
+              payload.directions[direction][meta.id][field] = input && input.value !== "" ? Number(input.value) : null;
+            });
+          });
+        });
+        return payload;
+      }
+      function saveFinanceSummary() {
+        if (role !== "leader") return Promise.reject(new Error("Редактировать финансы может только администратор"));
+        var button = document.getElementById("saveFinanceSummaryBtn");
+        button.disabled = true;
+        button.textContent = "Сохраняю…";
+        return apiFetch("/api/finance-summary",{method:"POST",headers:{"content-type":"application/json","x-nsl-role":role},body:JSON.stringify(financeEditorPayload())}).then(function (response) {
+          if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось сохранить финансовую сводку"); });
+          return response.json();
+        }).then(function () {
+          financeEditMode = false;
+          return hydrateFinanceCenter();
+        }).then(function () { showToast("План и факт сохранены для " + activeMonthLabel(selectedFinanceMonth)); }).finally(function () { button.disabled = false; button.textContent = "Сохранить план и факт"; });
       }
       function hydrateFinanceCenter() {
         var canRenderFinance = role === "leader";
@@ -4355,9 +4424,27 @@
         var b = e.target.closest("[data-brand]"); if (!b) return;
         currentBrand = b.dataset.brand;
         document.querySelectorAll("#brandSwitch .segment").forEach(function (x) { x.classList.toggle("active", x === b); });
-        renderFinanceKpis(currentFinanceData);
+        renderFinanceKpis(financeDisplayData(currentFinanceData));
         renderFinanceTrend(currentFinanceData);
       });
+      document.getElementById("financeMonthSelect").addEventListener("change",function (event) {
+        var month = event.target.value;
+        if (!month || month < "2026-08") { event.target.value = selectedFinanceMonth; return showToast("Редактирование доступно с августа 2026"); }
+        selectedFinanceMonth = month;
+        financeEditMode = false;
+        if (currentFinanceData) renderFinanceCenter(currentFinanceData,Boolean(currentFinanceData.source && currentFinanceData.source.mode === "exact-sheet-cache"));
+      });
+      document.getElementById("editFinanceSummaryBtn").addEventListener("click",function () {
+        if (role !== "leader") return showToast("Редактировать финансы может только администратор");
+        if (!currentFinanceData) return showToast("Сначала дождитесь загрузки финансовой сводки");
+        financeEditMode = true;
+        renderFinanceCenter(currentFinanceData,Boolean(currentFinanceData && currentFinanceData.source && currentFinanceData.source.mode === "exact-sheet-cache"));
+      });
+      document.getElementById("cancelFinanceSummaryBtn").addEventListener("click",function () {
+        financeEditMode = false;
+        if (currentFinanceData) renderFinanceCenter(currentFinanceData,Boolean(currentFinanceData.source && currentFinanceData.source.mode === "exact-sheet-cache"));
+      });
+      document.getElementById("saveFinanceSummaryBtn").addEventListener("click",function () { saveFinanceSummary().catch(function (error) { showToast(error.message || "Не удалось сохранить финансовую сводку"); }); });
       ["bloggerSearch","bloggerMonthFilter","statusFilter","managerFilter","brandFilter","categoryFilter","bloggerPlatformFilter","bloggerContractFilter","bloggerReachMin","bloggerReachMax","bloggerLeadsMin","bloggerSalesMin","bloggerRevenueMin","bloggerLastFrom","bloggerLastTo","bloggerSortFilter"].forEach(function (id) { document.getElementById(id).addEventListener("input", renderBloggers); });
       document.getElementById("resetBloggerFilters").addEventListener("click",function () {
         ["bloggerSearch","statusFilter","managerFilter","brandFilter","categoryFilter","bloggerPlatformFilter","bloggerContractFilter","bloggerReachMin","bloggerReachMax","bloggerLeadsMin","bloggerSalesMin","bloggerRevenueMin","bloggerLastFrom","bloggerLastTo"].forEach(function (id) { document.getElementById(id).value = ""; });
@@ -5220,6 +5307,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=106",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=107",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

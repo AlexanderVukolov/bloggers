@@ -12,6 +12,7 @@ const adminSummarySheetUrl = `https://docs.google.com/spreadsheets/d/${adminSumm
 const adminSummaryManualNamespace = "admin_summary_month";
 const adminSummaryCacheNamespace = "admin_summary_source";
 const adminSummaryCacheKey = "sheet-v1";
+const financeManualNamespace = "finance_manual_month_v1";
 const sharedNamespaces = new Set(["bootstrap_meta", "bootstrap_bloggers", "bootstrap_placements", "bootstrap_reels", "bootstrap_weekly_exits", "bootstrap_eugenia", "blogger", "blogger_create", "blogger_contract", "placement", "manager_report", "assistant_report", "monthly_plan", "placement_format", "manager_metrics", "placement_delete"]);
 const sharedAdminOnly = new Set(["bootstrap_meta", "bootstrap_bloggers", "bootstrap_placements", "bootstrap_reels", "bootstrap_weekly_exits", "bootstrap_eugenia", "blogger", "monthly_plan", "manager_metrics", "placement_delete"]);
 
@@ -191,7 +192,79 @@ function financeMetricId(label: unknown) { const value = String(label || "").toL
 function financeMonthKey(endDate: unknown) { const match = String(endDate || "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return match ? `${match[3]}-${match[2]}` : ""; }
 function parseFinanceSheet(csv: string, tab: any) { const rows = parseCsv(csv); const months: Record<string, any> = {}; let active = ""; for (const row of rows) { const month = financeMonthKey(row[1]); if (month) { active = month; months[active] = { month: active, direction: tab.key, title: tab.title, metrics: {} }; continue; } if (!active) continue; const id = financeMetricId(row[1]); if (!id || id === "outreach" || id === "costs") continue; const plan = financeNumber(row[2]); const fact = financeNumber(row[3]); const progress = financeNumber(row[4]); months[active].metrics[id] = { plan, fact, progress }; } return months; }
 const financeMetricOrder = ["paidIntegrations", "paidBudget", "reach", "clicks", "outreach", "leads", "qualifiedLeads", "sales", "revenue", "exits", "roi", "romi", "costs"];
+const financeEditableMetricOrder = financeMetricOrder.filter((id) => id !== "roi" && id !== "romi");
 function combineFinanceMonth(month: string, directions: Record<string, any>) { const available = Object.values(directions).filter(Boolean) as any[]; const metrics: Record<string, any> = {}; for (const id of financeMetricOrder) { if (id === "roi" || id === "romi") continue; const values = available.map((item) => item.metrics[id]).filter(Boolean); const shared = id === "outreach"; const plans = values.map((item) => item.plan).filter((value) => value != null); const facts = values.map((item) => item.fact).filter((value) => value != null); const plan = plans.length ? (shared ? Math.max(...plans) : plans.reduce((sum, value) => sum + value, 0)) : null; const fact = facts.length ? (shared ? Math.max(...facts) : facts.reduce((sum, value) => sum + value, 0)) : null; metrics[id] = { plan, fact, progress: plan > 0 && fact != null ? fact / plan * 100 : null }; } const revenue = metrics.revenue || {}; const costs = metrics.costs || {}; const budget = metrics.paidBudget || {}; metrics.roi = { plan: null, fact: costs.fact > 0 && revenue.fact != null ? (revenue.fact - costs.fact) / costs.fact * 100 : null, progress: null }; metrics.romi = { plan: null, fact: budget.fact > 0 && revenue.fact != null ? (revenue.fact - budget.fact) / budget.fact * 100 : null, progress: null }; return { month, directions, combined: { month, direction: "all", title: "Все направления", metrics }, availableDirections: available.map((item) => item.direction) }; }
+
+function emptyFinanceDirection(month: string, direction: "ln" | "fit") {
+  return { month, direction, title: direction === "fit" ? "FIT PRO" : "ЛН", metrics: {} };
+}
+function recalculateFinanceDirection(direction: any) {
+  const metrics = direction.metrics || (direction.metrics = {});
+  for (const id of financeEditableMetricOrder) {
+    const metric = metrics[id];
+    if (metric) metric.progress = metric.plan > 0 && metric.fact != null ? metric.fact / metric.plan * 100 : null;
+  }
+  const revenue = metrics.revenue || {};
+  const costs = metrics.costs || {};
+  const budget = metrics.paidBudget || {};
+  metrics.roi = { plan: null, fact: costs.fact > 0 && revenue.fact != null ? (revenue.fact - costs.fact) / costs.fact * 100 : null, progress: null, calculated: true };
+  const marketingCosts = budget.fact > 0 ? budget.fact : costs.fact;
+  metrics.romi = { plan: null, fact: marketingCosts > 0 && revenue.fact != null ? (revenue.fact - marketingCosts) / marketingCosts * 100 : null, progress: null, calculated: true };
+  return direction;
+}
+async function financeManualRecords(admin: any) {
+  const { data, error } = await admin.from("blogger_shared_state").select("record_key,value_json,updated_at").eq("namespace", financeManualNamespace).gte("record_key", "2026-08").order("record_key");
+  if (error) throw error;
+  return data || [];
+}
+async function mergeFinanceManualSummary(admin: any, summary: any) {
+  const byMonth: Record<string, any> = {};
+  const baseEntries = (summary?.archive || []).concat(summary?.current ? [summary.current] : []);
+  for (const entry of baseEntries) if (entry?.month) byMonth[entry.month] = entry;
+  const records = await financeManualRecords(admin);
+  for (const record of records) {
+    const month = String(record.record_key || "");
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || month < "2026-08") continue;
+    const base = byMonth[month] || { month, directions: {}, combined: null, availableDirections: [] };
+    const directions = base.directions || (base.directions = {});
+    for (const directionKey of ["ln", "fit"] as const) {
+      const manualDirection = record.value_json?.directions?.[directionKey];
+      if (!manualDirection) continue;
+      const direction = directions[directionKey] || (directions[directionKey] = emptyFinanceDirection(month, directionKey));
+      const metrics = direction.metrics || (direction.metrics = {});
+      for (const id of financeEditableMetricOrder) {
+        const manualMetric = manualDirection[id];
+        if (!manualMetric || typeof manualMetric !== "object") continue;
+        const previous = metrics[id] || {};
+        const plan = manualMetric.plan == null ? null : Number(manualMetric.plan);
+        const fact = manualMetric.fact == null ? null : Number(manualMetric.fact);
+        metrics[id] = {
+          ...previous,
+          plan: Number.isFinite(plan) ? plan : null,
+          fact: Number.isFinite(fact) ? fact : null,
+          manual: true,
+          source: "Ручная правка администратора в CRM",
+        };
+      }
+      recalculateFinanceDirection(direction);
+    }
+    const rebuilt = combineFinanceMonth(month, directions);
+    for (const id of financeEditableMetricOrder) {
+      const hasManual = [directions.ln, directions.fit].some((direction: any) => Boolean(direction?.metrics?.[id]?.manual));
+      if (hasManual && rebuilt.combined.metrics[id]) rebuilt.combined.metrics[id] = { ...rebuilt.combined.metrics[id], manual: true, source: "ЛН + FIT PRO · ручные значения CRM" };
+    }
+    rebuilt.manual = true;
+    rebuilt.manualUpdatedAt = record.updated_at;
+    byMonth[month] = rebuilt;
+  }
+  const entries = Object.values(byMonth).sort((a: any, b: any) => String(b.month).localeCompare(String(a.month)));
+  return {
+    ...(summary || {}),
+    current: entries[0] || null,
+    archive: entries.slice(1),
+    manualMonths: records.map((record: any) => record.record_key),
+  };
+}
 
 function financeMetric(plan: unknown, fact: unknown) {
   const parsedPlan = plan == null ? null : Number(plan);
@@ -539,6 +612,35 @@ Deno.serve(async (request: Request) => {
     const id = path.split("/").pop() || ""; const { data: record } = await admin.from("blogger_contracts").select("*").eq("id", id).maybeSingle(); if (!record || (blogger && record.blogger_key !== blogger)) return json(request, { error: "Договор не найден" }, 404); if (request.method === "DELETE") { if (!writable(role)) return json(request, { error: "Недостаточно прав" }, 403); await admin.storage.from(bucketId).remove([record.object_path]); await admin.from("blogger_contracts").delete().eq("id", id); return json(request, { ok: true }); } if (request.method === "GET") { const { data, error } = await admin.storage.from(bucketId).download(record.object_path); if (error || !data) return json(request, { error: "Файл не найден" }, 404); return new Response(data, { headers: { ...corsHeaders(request), "content-type": record.mime_type, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(record.file_name)}`, "cache-control": "private, no-store" } }); }
   }
 
+  if (path === "/api/finance-summary" && request.method === "POST") {
+    if (role !== "leader") return json(request, { error: "Редактировать финансы может только администратор" }, 403);
+    const body = await request.json().catch(() => null);
+    const month = String(body?.month || "").trim();
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || month < "2026-08") return json(request, { error: "Редактирование доступно с августа 2026" }, 400);
+    const directions: Record<string, any> = {};
+    for (const directionKey of ["ln", "fit"] as const) {
+      const sourceDirection = body?.directions?.[directionKey];
+      if (!sourceDirection || typeof sourceDirection !== "object") return json(request, { error: "Заполните ЛН и FIT PRO" }, 400);
+      directions[directionKey] = {};
+      for (const id of financeEditableMetricOrder) {
+        const sourceMetric = sourceDirection[id];
+        const metric: Record<string, number | null> = { plan: null, fact: null };
+        for (const field of ["plan", "fact"] as const) {
+          if (sourceMetric?.[field] == null || sourceMetric[field] === "") continue;
+          const value = Number(sourceMetric[field]);
+          if (!Number.isFinite(value) || value < 0 || value > 100000000000) return json(request, { error: "Проверьте значения плана и факта" }, 400);
+          metric[field] = Math.round(value * 100) / 100;
+        }
+        directions[directionKey][id] = metric;
+      }
+    }
+    const updatedAt = new Date().toISOString();
+    const value = { month, directions, updatedAt };
+    const { error } = await admin.from("blogger_shared_state").upsert({ namespace: financeManualNamespace, record_key: month, value_json: value, updated_at: updatedAt, updated_by: userId });
+    if (error) return json(request, { error: error.message }, 500);
+    return json(request, { ok: true, month, updatedAt });
+  }
+
   if (path === "/api/finance-summary" && request.method === "GET") {
     if (role !== "leader") return json(request, { error: "Финансы доступны только администратору" }, 403);
     const sheetId = "1jWHvXtzPssACQ7GCcMwpVx31qjj-riyFu4rTW9ajL9A";
@@ -546,7 +648,7 @@ Deno.serve(async (request: Request) => {
     const source = { spreadsheetId: sheetId, url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit`, tabs: tabs.map((tab) => tab.title) };
     const exactCache = await cachedDepartmentFinanceSummary(admin);
     const cacheAge = exactCache?.updatedAt ? Date.now() - new Date(exactCache.updatedAt).getTime() : Infinity;
-    if (exactCache && cacheAge < 10 * 60 * 1000) return json(request, { source: { ...source, mode: "exact-sheet-cache" }, ...exactCache });
+    if (exactCache && cacheAge < 10 * 60 * 1000) return json(request, { source: { ...source, mode: "exact-sheet-cache" }, ...await mergeFinanceManualSummary(admin, exactCache) });
     try {
       const results = await Promise.all(tabs.map(async (tab) => {
         const response = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${tab.gid}&range=A1:E80&_=${Date.now()}`);
@@ -560,11 +662,11 @@ Deno.serve(async (request: Request) => {
         return combineFinanceMonth(month, directions);
       });
       if (!summaries.length) throw new Error("empty finance source");
-      const exactSummary = { updatedAt: new Date().toISOString(), current: summaries[0], archive: summaries.slice(1, 3) };
+      const exactSummary = { updatedAt: new Date().toISOString(), current: summaries[0], archive: summaries.slice(1) };
       await saveDepartmentFinanceSummary(admin, exactSummary);
-      return json(request, { source: { ...source, mode: "live-sheet" }, ...exactSummary });
+      return json(request, { source: { ...source, mode: "live-sheet" }, ...await mergeFinanceManualSummary(admin, exactSummary) });
     } catch {
-      if (exactCache) return json(request, { source: { ...source, mode: "exact-sheet-cache" }, ...exactCache });
+      if (exactCache) return json(request, { source: { ...source, mode: "exact-sheet-cache" }, ...await mergeFinanceManualSummary(admin, exactCache) });
       return json(request, { error: "Не удалось обновить отчет ЛН и FIT PRO" }, 502);
     }
   }

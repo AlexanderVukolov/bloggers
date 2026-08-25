@@ -25,6 +25,18 @@ test("admin summary is protected and supports automatic months plus manual overr
   assert.match(apiSource,/manualRows\.forEach\(\(row: any\) => \{ merged\[row\.month\] = row; \}\)/);
 });
 
+test("finance summary is editable by admins from August 2026 onward",() => {
+  assert.match(source,/id="financeMonthSelect" type="month" min="2026-08"/);
+  assert.match(source,/id="editFinanceSummaryBtn"/);
+  assert.match(source,/function saveFinanceSummary\(\)/);
+  assert.match(source,/apiFetch\("\/api\/finance-summary",\{method:"POST"/);
+  assert.match(apiSource,/financeManualNamespace = "finance_manual_month_v1"/);
+  assert.match(apiSource,/path === "\/api\/finance-summary" && request\.method === "POST"/);
+  assert.match(apiSource,/month < "2026-08"/);
+  assert.match(apiSource,/role !== "leader"/);
+  assert.match(apiSource,/mergeFinanceManualSummary/);
+});
+
 function extractFunction(name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start,-1,`function ${name} should exist`);
@@ -124,6 +136,33 @@ test("finance uses the two project sheets for clicks, costs and ROI",() => {
   assert.equal(data.current.combined.metrics.revenue.fact,1051922);
   assert.equal(data.current.combined.metrics.costs.fact,360220);
   assert.equal(data.current.combined.metrics.roi.fact,(1051922-360220)/360220*100);
+});
+
+test("manual CRM finance values override imports and combined efficiency uses summed costs",() => {
+  const context = {
+    Object,Number,String,Math,
+    dashboardReportDates:() => [],activeEmployeeManagers:() => [],activeEmployeeAssistants:() => [],
+    managerOutreachSummary:() => ({monthPlan:0,monthFact:0}),assistantOutreachSummary:() => ({monthPlan:0,monthFact:0}),
+    monthlyDepartmentPlanSetting:() => ({outreachMonth:0}),
+    synchronizedPlacementRecords:() => [],placementDirection:() => "ЛН",monthFromDateValue:() => "",bloggers:[],
+    monthlyDirectionFact:() => ({exits:999}),
+  };
+  ["programOutreachMetric","programDirectionCostMetric","officialDirectionOverrideMetric","attachProgramFinanceMetrics"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  function metric(fact) { return {plan:null,fact,manual:true,source:"CRM"}; }
+  const data = {current:{month:"2026-09",directions:{
+    ln:{metrics:{exits:metric(2),clicks:metric(100),revenue:metric(5000),costs:metric(1000),paidBudget:metric(500)}},
+    fit:{metrics:{exits:metric(3),clicks:metric(200),revenue:metric(3000),costs:metric(1000),paidBudget:metric(500)}},
+  },combined:{metrics:{exits:metric(5),clicks:metric(300),revenue:metric(8000),costs:metric(2000),paidBudget:metric(1000)}}}};
+  context.attachProgramFinanceMetrics(data);
+  assert.equal(data.current.directions.ln.metrics.exits.fact,2);
+  assert.equal(data.current.directions.fit.metrics.clicks.fact,200);
+  assert.equal(data.current.combined.metrics.revenue.fact,8000);
+  assert.equal(data.current.combined.metrics.costs.fact,2000);
+  assert.equal(data.current.combined.metrics.roi.fact,300);
+  assert.equal(data.current.combined.metrics.romi.fact,700);
 });
 
 test("FIT PRO uses the confirmed August sale in every summary",() => {
