@@ -1158,15 +1158,23 @@
           ["plan","fact","replies","approvals","newBloggers"].forEach(function (field) { total[field] += Number(row.daily[field] || 0); });
           return total;
         },{plan:0,fact:0,replies:0,approvals:0,newBloggers:0});
-        var placement;
-        if (selected === "all") {
-          placement = ["ЛН","FIT PRO"].map(function (direction) { return applyOfficialDirectionMetrics(monthlyDirectionFact(month,direction),month); }).reduce(function (total,item) {
-            ["exits","guaranteed","reach","clicks","sales","revenue"].forEach(function (field) { total[field] += Number(item[field] || 0); });
-            return total;
-          },{exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0});
-        } else {
-          placement = rows.length && rows[0].kind === "manager" ? rows[0].fact : {exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0};
-        }
+        var selectedManager = selected !== "all" && rows.length && rows[0].kind === "manager" ? rows[0].name : "";
+        var directionPlacement = ["ЛН","FIT PRO"].map(function (direction) {
+          if (selected !== "all" && !selectedManager) return {direction:direction,exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0};
+          if (selectedManager) {
+            var managerDirection = canonicalMonthlyExitFact(month,{manager:selectedManager,direction:direction});
+            managerDirection.direction = direction;
+            managerDirection.guaranteed = monthlyExitGuarantee(month,direction,selectedManager);
+            return managerDirection;
+          }
+          return applyOfficialDirectionMetrics(monthlyDirectionFact(month,direction),month);
+        });
+        var placement = directionPlacement.reduce(function (total,item) {
+          ["exits","guaranteed","reach","clicks","sales","revenue"].forEach(function (field) { total[field] += Number(item[field] || 0); });
+          return total;
+        },{exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0});
+        var lnPlacement = directionPlacement[0] || {reach:0};
+        var fitPlacement = directionPlacement[1] || {reach:0};
         var cards = [
           ["Рассылки за месяц",number(communication.fact),"план " + number(communication.plan),rate(communication.fact,communication.plan),"↗"],
           ["Ответы",number(communication.replies),percent(rate(communication.replies,communication.fact),1) + " от рассылок",rate(communication.replies,communication.fact),"◎"],
@@ -1174,7 +1182,7 @@
           ["Новые блогеры",number(communication.newBloggers),"добавлены за месяц",communication.newBloggers ? 100 : 0,"＋"],
           ["Выходы за месяц",number(placement.exits),"подтверждённые размещения",placement.exits ? 100 : 0,"▶"],
           ["Гарант охвата",number(placement.guaranteed),"из выходов",rate(placement.reach,placement.guaranteed),"◌"],
-          ["Фактический охват",number(placement.reach),number(placement.clicks) + " кликов",rate(placement.reach,placement.guaranteed),"◉"],
+          ["Фактический охват ЛН + FIT PRO",number(placement.reach),"ЛН " + number(lnPlacement.reach) + " · FIT PRO " + number(fitPlacement.reach) + " · " + number(placement.clicks) + " кликов",rate(placement.reach,placement.guaranteed),"◉"],
           ["Выручка",money(placement.revenue),number(placement.sales) + " продаж",placement.revenue ? 100 : 0,"₽"]
         ];
         document.getElementById("monthlyControlKpis").innerHTML = cards.map(function (card) {
@@ -5022,6 +5030,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=101",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=102",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
