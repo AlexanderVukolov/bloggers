@@ -255,3 +255,36 @@ test("manager reach KPI uses the individual monthly reach plan",() => {
   assert.equal(result.autoReachKpi,10000);
   assert.equal(result.salary,45500);
 });
+
+
+test("guaranteed reach in monthly reports comes from the exits registry",() => {
+  const placements = [
+    {id:1,direction:"ЛН",manager:"Manager A"},
+    {id:2,direction:"FIT PRO",manager:"Manager B"},
+  ];
+  const context = {
+    Object,Number,String,Math,
+    synchronizedPlacementRecords:() => placements,
+    syncedWeeklyExits:() => [
+      {id:"one",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",plannedReach:1000},
+      {id:"one-copy",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",plannedReach:1200},
+      {id:"two",sourcePlacementId:2,sortDate:"2026-08-11",sourceKey:"blogger-b",plannedReach:2000},
+    ],
+    linkedBloggerForPlacement:() => null,
+    placementDirection:item => item.direction,
+    normalizeBloggerIdentity:value => String(value || "").toLowerCase(),
+    employeeNameMatches:(expected,actual) => expected === actual,
+  };
+  const exitGuarantee = runFunction("monthlyExitGuarantee",context);
+  assert.equal(exitGuarantee("2026-08","ЛН"),1200);
+  assert.equal(exitGuarantee("2026-08","FIT PRO"),2000);
+  assert.equal(exitGuarantee("2026-08",null,"Manager A"),1200);
+  assert.equal(exitGuarantee("2026-08",null,"Manager B"),2000);
+
+  context.canonicalMonthlyExitFact = () => ({guaranteed:11350});
+  context.monthlyExitGuarantee = () => 560000;
+  const managerFact = runFunction("monthlyManagerFact",context);
+  const directionFact = runFunction("monthlyDirectionFact",context);
+  assert.equal(managerFact("Manager A","2026-08").guaranteed,560000);
+  assert.equal(directionFact("2026-08","ЛН").guaranteed,560000);
+});

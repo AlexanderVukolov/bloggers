@@ -1048,7 +1048,9 @@
         return result;
       }
       function monthlyManagerFact(manager,month) {
-        return canonicalMonthlyExitFact(month,{manager:manager});
+        var result = canonicalMonthlyExitFact(month,{manager:manager});
+        result.guaranteed = monthlyExitGuarantee(month,null,manager);
+        return result;
       }
       function monthlyPlanInput(manager,month,field,value) {
         if (role !== "leader") return '<b>' + (field === "revenue" ? money(value) : number(value)) + '</b>';
@@ -1274,7 +1276,7 @@
         monthInput.value = Object.prototype.hasOwnProperty.call(plan,"outreachMonth") ? Math.max(0,Number(plan.outreachMonth || 0)) : 0;
         document.getElementById("departmentOutreachPlanMonth").textContent = activeMonthLabel(month);
       }
-      function monthlyExitGuarantee(month,direction) {
+      function monthlyExitGuarantee(month,direction,manager) {
         var placementsById = {};
         synchronizedPlacementRecords().forEach(function (item) {
           if (item && item.id != null) placementsById[String(item.id)] = item;
@@ -1285,7 +1287,9 @@
           var placement = item.sourcePlacementId != null && item.sourcePlacementId !== "" ? placementsById[String(item.sourcePlacementId)] : null;
           var blogger = linkedBloggerForPlacement(placement || item);
           var itemDirection = placement ? placementDirection(placement) : (item.direction || item.brand || (blogger && blogger.brand) || "ЛН");
-          if (itemDirection !== direction) return null;
+          var itemManager = placement ? placement.manager : (item.manager || (blogger && blogger.manager) || "");
+          if (direction && itemDirection !== direction) return null;
+          if (manager && !employeeNameMatches(manager,itemManager)) return null;
           var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id || "");
           var source = String((placement && placement.source) || item.source || "").toLowerCase();
           var format = String(item.format || (placement && placement.type) || "").toLowerCase();
@@ -1311,7 +1315,9 @@
         return Object.keys(importedBundles).reduce(function (sum,key) { return sum + importedBundles[key].value; },total);
       }
       function monthlyDirectionFact(month,direction) {
-        return canonicalMonthlyExitFact(month,{direction:direction});
+        var result = canonicalMonthlyExitFact(month,{direction:direction});
+        result.guaranteed = monthlyExitGuarantee(month,direction);
+        return result;
       }
       function dashboardDirectionCard(item,month) {
         var isLn = item.direction === "ЛН";
@@ -4826,6 +4832,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=92",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=93",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
