@@ -1301,38 +1301,18 @@
         synchronizedPlacementRecords().forEach(function (item) {
           if (item && item.id != null) placementsById[String(item.id)] = item;
         });
-        var candidates = syncedWeeklyExits().map(function (item) {
+        return syncedWeeklyExits().reduce(function (total,item) {
           var date = String(item.sortDate || "");
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0,7) !== month) return null;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0,7) !== month) return total;
           var placement = item.sourcePlacementId != null && item.sourcePlacementId !== "" ? placementsById[String(item.sourcePlacementId)] : null;
           var blogger = linkedBloggerForPlacement(placement || item);
           var itemDirection = placement ? placementDirection(placement) : (item.direction || item.brand || (blogger && blogger.brand) || "ЛН");
           var itemManager = placement ? placement.manager : (item.manager || (blogger && blogger.manager) || "");
-          if (direction && itemDirection !== direction) return null;
-          if (manager && !employeeNameMatches(manager,itemManager)) return null;
-          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) || String(item.id || "");
-          var source = String((placement && placement.source) || item.source || "").toLowerCase();
-          var format = String(item.format || (placement && placement.type) || "").toLowerCase();
-          return {identity:identity,date:date,format:format,source:source,value:Math.max(0,Number(item.plannedReach != null ? item.plannedReach : placement && placement.guaranteed || 0))};
-        }).filter(Boolean);
-        var importedBundles = {};
-        candidates.forEach(function (item) {
-          if (item.source.indexOf("рилсы и карусели") < 0 || ["reels","рилс","карусель","carousel"].indexOf(item.format) < 0) return;
-          var bundle = importedBundles[item.identity] || {value:0,dates:{}};
-          bundle.value = Math.max(bundle.value,item.value);
-          bundle.dates[item.date] = true;
-          importedBundles[item.identity] = bundle;
-        });
-        var guaranteeByExit = {};
-        candidates.forEach(function (item) {
-          var bundle = importedBundles[item.identity];
-          var isImportedBundle = item.source.indexOf("рилсы и карусели") >= 0 && ["reels","рилс","карусель","carousel"].indexOf(item.format) >= 0;
-          if (isImportedBundle || (bundle && bundle.dates[item.date])) return;
-          var key = item.identity + "|" + item.date;
-          guaranteeByExit[key] = Math.max(Number(guaranteeByExit[key] || 0),item.value);
-        });
-        var total = Object.keys(guaranteeByExit).reduce(function (sum,key) { return sum + guaranteeByExit[key]; },0);
-        return Object.keys(importedBundles).reduce(function (sum,key) { return sum + importedBundles[key].value; },total);
+          if (direction && itemDirection !== direction) return total;
+          if (manager && !employeeNameMatches(manager,itemManager)) return total;
+          var value = Number(item.plannedReach != null ? item.plannedReach : placement && placement.guaranteed || 0);
+          return total + (Number.isFinite(value) && value > 0 ? value : 0);
+        },0);
       }
       function monthlyDirectionFact(month,direction) {
         var result = canonicalMonthlyExitFact(month,{direction:direction});
@@ -4853,6 +4833,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=94",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=95",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

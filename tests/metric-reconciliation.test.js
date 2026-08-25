@@ -263,7 +263,7 @@ test("manager reach KPI uses the individual monthly reach plan",() => {
 });
 
 
-test("guaranteed reach in monthly reports comes from the exits registry",() => {
+test("guaranteed reach on dashboard is the exact sum of canonical exit rows",() => {
   const placements = [
     {id:1,direction:"ЛН",manager:"Manager A"},
     {id:2,direction:"FIT PRO",manager:"Manager B"},
@@ -272,9 +272,9 @@ test("guaranteed reach in monthly reports comes from the exits registry",() => {
     Object,Number,String,Math,
     synchronizedPlacementRecords:() => placements,
     syncedWeeklyExits:() => [
-      {id:"one",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",plannedReach:1000},
-      {id:"one-copy",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",plannedReach:1200},
-      {id:"two",sourcePlacementId:2,sortDate:"2026-08-11",sourceKey:"blogger-b",plannedReach:2000},
+      {id:"one",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",format:"Reels",plannedReach:1000},
+      {id:"one-stories",sourcePlacementId:1,sortDate:"2026-08-10",sourceKey:"blogger-a",format:"Stories",plannedReach:1200},
+      {id:"two",sourcePlacementId:2,sortDate:"2026-08-11",sourceKey:"blogger-b",format:"Reels",plannedReach:2000},
     ],
     linkedBloggerForPlacement:() => null,
     placementDirection:item => item.direction,
@@ -282,9 +282,9 @@ test("guaranteed reach in monthly reports comes from the exits registry",() => {
     employeeNameMatches:(expected,actual) => expected === actual,
   };
   const exitGuarantee = runFunction("monthlyExitGuarantee",context);
-  assert.equal(exitGuarantee("2026-08","ЛН"),1200);
+  assert.equal(exitGuarantee("2026-08","ЛН"),2200);
   assert.equal(exitGuarantee("2026-08","FIT PRO"),2000);
-  assert.equal(exitGuarantee("2026-08",null,"Manager A"),1200);
+  assert.equal(exitGuarantee("2026-08",null,"Manager A"),2200);
   assert.equal(exitGuarantee("2026-08",null,"Manager B"),2000);
 
   context.canonicalMonthlyExitFact = () => ({guaranteed:11350});
