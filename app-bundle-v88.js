@@ -2722,13 +2722,29 @@
           return '<article class="card team-card"><div class="team-top"><div class="avatar">' + initials(employee.name) + '</div><div><h4>' + safeText(employee.name) + '</h4><p>' + safeText(employee.email) + assigned + '</p><p>' + safeText(employeeContractLabel(employee)) + '</p></div><span class="badge ' + employeeRoleBadge(employee.role) + ' team-role">' + employeeRoleLabel(employee.role) + '</span></div><div class="team-stats">' + stats.map(function (item) { return '<div class="team-stat"><strong>' + (typeof item[0] === "number" ? number(item[0]) : safeText(item[0])) + '</strong><span>' + item[1] + '</span></div>'; }).join("") + '</div><div class="salary"><span>Оклад / зарплата · ' + monthLabel.toLowerCase() + '</span><b>' + money(salary) + '</b></div><div class="access-status"><span class="badge ' + statusClass + '">' + statusLabel + '</span><span class="badge ' + accessClass + '">' + accessLabel + '</span></div><div class="team-card-actions"><button class="btn btn-sm btn-outline" type="button" data-open-employee-profile="' + safeText(employee.id) + '">Кабинет</button><button class="btn btn-sm btn-outline" type="button" data-create-employee-access="' + safeText(employee.id) + '">' + (employee.accessStatus === "connected" ? "Новая ссылка" : "Создать доступ") + '</button><button class="btn btn-sm btn-outline" type="button" data-edit-employee="' + safeText(employee.id) + '">Редактировать</button></div></article>';
         }).join("") || '<div class="card empty-state">Сотрудники ещё не добавлены.</div>';
       }
+      function employeeProfileBloggers(employee) {
+        if (!employee) return [];
+        if (employee.role === "leader") return bloggers.slice();
+        if (employee.role === "assistant") return bloggers.filter(function (blogger) {
+          return blogger.createdByRole === "assistant" && employeeNameMatches(employee,blogger.createdByName);
+        });
+        return bloggers.filter(function (blogger) { return employeeNameMatches(employee,blogger.manager); });
+      }
       function employeeHistoryMonths(employee) {
         var values = [activeMonthKey()];
         Object.keys(dailyManagerReports).forEach(function (date) { values.push(date.slice(0,7)); });
         Object.keys(dailyAssistantReports).forEach(function (date) { values.push(date.slice(0,7)); });
         synchronizedPlacementRecords().forEach(function (item) { if (employeeNameMatches(employee,item.manager)) values.push((item.sortDate || "").slice(0,7)); });
+        employeeProfileBloggers(employee).forEach(function (blogger) { values.push(monthFromDateValue(blogger.createdAt)); });
         departmentMonths.forEach(function (item) { values.push(item.month); });
         return values.filter(function (value,index,array) { return /^\d{4}-\d{2}$/.test(value) && array.indexOf(value) === index; }).sort().reverse().slice(0,24);
+      }
+      function employeeTotalActivity(employee) {
+        return employeeHistoryMonths(employee).reduce(function (total,month) {
+          var item = employeeMonthActivity(employee,month);
+          ["outreach","exits","reach","approvals","transferred"].forEach(function (field) { total[field] += Number(item[field] || 0); });
+          return total;
+        },{outreach:0,exits:0,reach:0,approvals:0,transferred:0});
       }
       function managerMonthActivity(employee,month) {
         var dates = Object.keys(dailyManagerReports).filter(function (date) { return date.slice(0,7) === month; }).sort().reverse();
@@ -2791,11 +2807,32 @@
         document.getElementById("employeeProfileMeta").textContent = employee.email + " · " + employeeRoleLabel(employee.role) + (employee.assignedManager ? " · закреплён за " + employee.assignedManager : "") + " · " + employeeContractLabel(employee);
         var accessLabel = employee.accessStatus === "connected" ? "Кабинет подключён" : employee.accessStatus === "invited" ? "Ожидает регистрации" : "Доступ не создан";
         document.getElementById("employeeProfileBadges").innerHTML = '<span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span><span class="badge ' + (employee.status === "active" ? "badge-green" : "badge-red") + '">' + (employee.status === "active" ? "Активен" : "Приостановлен") + '</span><span class="badge ' + (employee.accessStatus === "connected" ? "badge-green" : "badge-amber") + '">' + accessLabel + '</span>';
-        var month = activeMonthKey();
+        var months = employeeHistoryMonths(employee);
+        var monthSelect = document.getElementById("employeeProfileMonthFilter");
+        var previousMonth = monthSelect ? monthSelect.value : "";
+        if (monthSelect) {
+          monthSelect.innerHTML = months.map(function (value) { return '<option value="' + value + '">' + safeText(kpiMonthLabel(value)) + '</option>'; }).join("");
+          monthSelect.value = months.indexOf(previousMonth) >= 0 ? previousMonth : months.indexOf(activeMonthKey()) >= 0 ? activeMonthKey() : (months[0] || activeMonthKey());
+        }
+        var month = monthSelect && monthSelect.value || activeMonthKey();
         var current = employeeMonthActivity(employee,month);
-        var databaseBloggerCount = bloggers.length;
-        var cards = employee.role === "assistant" ? [[current.outreach,"Рассылки за месяц"],[current.approvals,"Согласия"],[current.transferred,"Передано менеджеру"],[employee.assignedManager || "—","Закреплён за"]] : [[databaseBloggerCount,"Блогеров в базе"],[current.exits,"Выходов за месяц"],[current.reach,"Фактический охват"],[current.outreach,"Рассылки за месяц"]];
-        document.getElementById("employeeProfileKpis").innerHTML = cards.map(function (item) { return '<article class="card kpi"><div class="kpi-top"><span>' + safeText(item[1]) + '</span><span class="kpi-icon">✓</span></div><div class="kpi-value">' + (typeof item[0] === "number" ? number(item[0]) : safeText(item[0])) + '</div><div class="kpi-foot">' + activeMonthLabel(month) + '</div></article>'; }).join("");
+        var allTime = employeeTotalActivity(employee);
+        var profileBloggers = employeeProfileBloggers(employee);
+        var monthBloggers = profileBloggers.filter(function (blogger) { return monthFromDateValue(blogger.createdAt) === month; }).length;
+        var cards = employee.role === "assistant" ? [
+          {label:"Добавлено блогеров",month:monthBloggers,total:profileBloggers.length},
+          {label:"Рассылки",month:current.outreach,total:allTime.outreach},
+          {label:"Согласия",month:current.approvals,total:allTime.approvals},
+          {label:"Передано менеджеру",month:current.transferred,total:allTime.transferred}
+        ] : [
+          {label:"Блогеры",month:monthBloggers,total:profileBloggers.length},
+          {label:"Выходы",month:current.exits,total:allTime.exits},
+          {label:"Фактический охват",month:current.reach,total:allTime.reach},
+          {label:"Рассылки",month:current.outreach,total:allTime.outreach}
+        ];
+        document.getElementById("employeeProfileKpis").innerHTML = cards.map(function (item) {
+          return '<article class="card kpi"><div class="kpi-top"><span>' + safeText(item.label) + '</span><span class="kpi-icon">✓</span></div><div class="kpi-value">' + number(item.month) + ' / ' + number(item.total) + '</div><div class="kpi-foot">за ' + activeMonthLabel(month).toLowerCase() + ' / за всё время</div></article>';
+        }).join("");
         var rows = employeeHistoryMonths(employee).map(function (historyMonth) {
           var item = employeeMonthActivity(employee,historyMonth);
           return '<tr><td><b>' + safeText(kpiMonthLabel(historyMonth)) + '</b></td><td><span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span></td><td>' + number(item.outreach) + '</td><td>' + number(item.exits) + '</td><td><b>' + number(item.reach) + '</b></td><td>' + number(item.approvals) + '</td><td>' + number(item.transferred) + '</td><td>' + safeText(item.source) + '</td></tr>';
@@ -3991,6 +4028,7 @@
       });
       document.querySelectorAll(".nav-btn").forEach(function (b) { b.addEventListener("click", function () { if (b.dataset.page === "profile") employeeProfileTargetId = ""; navigate(b.dataset.page); }); });
       document.getElementById("backToTeamBtn").addEventListener("click",function () { employeeProfileTargetId = ""; navigate("team"); });
+      document.getElementById("employeeProfileMonthFilter").addEventListener("change",renderEmployeeProfile);
       document.querySelectorAll(".mobile-nav-btn").forEach(function (b) { b.addEventListener("click", function () { navigate(b.dataset.mobilePage); }); });
       document.querySelectorAll("[data-page-jump]").forEach(function (b) { b.addEventListener("click", function () { navigate(b.dataset.pageJump); }); });
       document.getElementById("reportViewSwitch").addEventListener("click", function (event) {
@@ -4874,6 +4912,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=99",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=100",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

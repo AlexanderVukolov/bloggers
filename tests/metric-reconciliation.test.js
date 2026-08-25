@@ -337,3 +337,32 @@ test("deleted employees disappear from active CRM while work history remains",()
   assert.match(source,/data\.employee \|\| employee,\{status:"paused",accessStatus:"revoked"\}/);
   assert.match(source,/история работы сохранена/);
 });
+
+test("employee profile shows selected month and all-time totals",() => {
+  const bloggersFixture = [
+    {id:1,manager:"Manager",createdAt:"2026-08-02",createdByRole:"manager",createdByName:"Manager"},
+    {id:2,manager:"Manager",createdAt:"2026-07-02",createdByRole:"assistant",createdByName:"Assistant"},
+    {id:3,manager:"Other",createdAt:"2026-08-03",createdByRole:"assistant",createdByName:"Assistant"},
+  ];
+  const profileBloggers = runFunction("employeeProfileBloggers",{
+    bloggers:bloggersFixture,
+    employeeNameMatches:(employee,value) => employee.name === value,
+  });
+  assert.equal(profileBloggers({name:"Manager",role:"manager"}).length,2);
+  assert.equal(profileBloggers({name:"Assistant",role:"assistant"}).length,2);
+  assert.equal(profileBloggers({name:"Admin",role:"leader"}).length,3);
+
+  const totalActivity = runFunction("employeeTotalActivity",{
+    employeeHistoryMonths:() => ["2026-08","2026-07"],
+    employeeMonthActivity:(employee,month) => month === "2026-08"
+      ? {outreach:10,exits:2,reach:1000,approvals:3,transferred:1}
+      : {outreach:5,exits:1,reach:500,approvals:2,transferred:1},
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(totalActivity({name:"Manager",role:"manager"}))),{
+    outreach:15,exits:3,reach:1500,approvals:5,transferred:2,
+  });
+
+  assert.match(source,/employeeProfileMonthFilter/);
+  assert.match(source,/number\(item\.month\) \+ ' \/ ' \+ number\(item\.total\)/);
+  assert.match(source,/за всё время/);
+});
