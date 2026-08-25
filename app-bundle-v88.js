@@ -376,7 +376,8 @@
             if (!directionEntry) return;
             var metrics = directionEntry.metrics || (directionEntry.metrics = {});
             metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
-            setMetricFact(metrics,"exits",Number(fact.exits || 0),"Главная · единый реестр выходов");
+            var sheetExits = metricFact(metrics,"exits");
+            setMetricFact(metrics,"exits",sheetExits != null ? sheetExits : Number(fact.exits || 0),sheetExits != null ? "@СОТ | ОМ | Отчет по блогерам · " + (directionName === "FIT PRO" ? "Отчет FIT PRO" : "Отчет ЛН") : "Главная · единый реестр выходов");
             var sheetClicks = metricFact(metrics,"clicks");
             setMetricFact(metrics,"clicks",sheetClicks,"@СОТ | ОМ | Отчет по блогерам · " + (directionName === "FIT PRO" ? "Отчет FIT PRO" : "Отчет ЛН"));
             ["sales","revenue"].forEach(function (id) {
@@ -392,7 +393,12 @@
           if (entry.combined) {
             var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
             entry.combined.metrics.outreach = programOutreachMetric(entry.month);
-            setMetricFact(combinedMetrics,"exits",Number(lnFact.exits || 0) + Number(fitFact.exits || 0),"Главная · ЛН + FIT PRO");
+            var directionExits = [directions.ln,directions.fit].reduce(function (sum,item) {
+              var value = metricFact(item && item.metrics,"exits");
+              if (value != null) { sum.value += value; sum.found = true; }
+              return sum;
+            },{value:0,found:false});
+            setMetricFact(combinedMetrics,"exits",directionExits.found ? directionExits.value : Number(lnFact.exits || 0) + Number(fitFact.exits || 0),directionExits.found ? "@СОТ | ОМ | Отчет по блогерам · ЛН + FIT PRO" : "Главная · ЛН + FIT PRO");
             var directionClicks = [directions.ln,directions.fit].reduce(function (sum,item) {
               var value = metricFact(item && item.metrics,"clicks");
               if (value != null) { sum.value += value; sum.found = true; }
@@ -536,6 +542,8 @@
           }
           var profilePage = document.getElementById("page-profile");
           if (profilePage && profilePage.classList.contains("active")) renderEmployeeProfile();
+          var placementsPage = document.getElementById("page-placements");
+          if (placementsPage && placementsPage.classList.contains("active")) renderPlacementRecords();
           return data;
         }).catch(function () {
           currentFinanceData = null;
@@ -1421,7 +1429,7 @@
         return officialDirectionOverrideMetric(month,direction,id);
       }
       function applyOfficialDirectionMetrics(item,month) {
-        var fields = ["reach","clicks","leads","sales","revenue"];
+        var fields = ["exits","reach","clicks","leads","sales","revenue"];
         var applied = [];
         fields.forEach(function (field) {
           var value = officialDirectionMetric(month,item.direction,field);
@@ -1432,7 +1440,7 @@
           }
           if (value == null || value < 0) return;
           item[field] = value;
-          applied.push(field === "reach" ? "фактический охват" : field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
+          applied.push(field === "exits" ? "размещения" : field === "reach" ? "фактический охват" : field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
         });
         if (applied.length) {
           var baseSource = String(item.source || "Выходы").replace(/ · Google Sheets:.*$/,"");
@@ -3248,6 +3256,36 @@
         }
         return {actual:actual,revenue:revenue,reported:reported,actualSource:actualSource,revenueSource:revenueSource,canonical:canonical};
       }
+      function officialPlacementCountForFilters(rows) {
+        var month = document.getElementById("placementMonthFilter").value;
+        if (!month) return null;
+        var direction = document.getElementById("placementDirectionFilter").value;
+        if (placementQuickFilter === "ln") direction = "ЛН";
+        else if (placementQuickFilter === "fit") direction = "FIT PRO";
+        else if (placementQuickFilter !== "all") return null;
+        var detailedFilterValues = [
+          document.getElementById("placementSearch").value.trim(),
+          document.getElementById("placementManagerFilter").value,
+          document.getElementById("placementDecisionFilter").value,
+          document.getElementById("placementDealTypeFilter").value,
+          document.getElementById("placementStatusFilter").value,
+          document.getElementById("placementFormatFilter").value.trim(),
+          document.getElementById("placementReachMin").value,
+          document.getElementById("placementReachMax").value,
+          document.getElementById("placementDateFrom").value,
+          document.getElementById("placementDateTo").value,
+          document.getElementById("placementContractFilter").value
+        ];
+        if (detailedFilterValues.some(function (value) { return String(value || "").trim() !== ""; })) return null;
+        if (direction) {
+          var directionValue = officialDirectionMetric(month,direction,"exits");
+          return directionValue == null ? null : Math.max(0,Number(directionValue));
+        }
+        var lnValue = officialDirectionMetric(month,"ЛН","exits");
+        var fitValue = officialDirectionMetric(month,"FIT PRO","exits");
+        if (lnValue == null || fitValue == null) return null;
+        return Math.max(0,Number(lnValue)) + Math.max(0,Number(fitValue));
+      }
       function renderPlacementRecords() {
         var rows = filteredPlacementRecords();
         document.getElementById("placementFilterCount").textContent = "Найдено: " + number(rows.length) + " из " + number(synchronizedPlacementRecords().length) + (document.getElementById("placementMonthFilter").value ? " · выбран " + activeMonthLabel(document.getElementById("placementMonthFilter").value) : " · вся база");
@@ -3261,9 +3299,11 @@
         var reported = placementSummaryMetricsValue.reported;
         var syncedReported = rows.filter(function (item) { return item._cardSyncedActual || item.isCardReach; }).length;
         var syncedFields = rows.filter(function (item) { return item._cardSyncedActual || item.isCardReach || Object.keys(item._cardSyncedMeta || {}).length || Object.keys(item._cardSyncedMetrics || {}).length; }).length;
-        document.getElementById("placementImportMeta").textContent = rows.length + " размещений · " + syncedFields + " дополнено из карточек · итоги синхронизированы с главной";
+        var officialPlacementCount = officialPlacementCountForFilters(rows);
+        var placementCount = officialPlacementCount == null ? rows.length : officialPlacementCount;
+        document.getElementById("placementImportMeta").textContent = number(placementCount) + " размещений · " + number(rows.length) + " строк форматов · " + syncedFields + " дополнено из карточек · итог синхронизирован с таблицей";
         var summary = [
-          ["Размещений",number(rows.length),"из реестра","▤"],
+          ["Размещений",number(placementCount),officialPlacementCount == null ? "по текущему фильтру" : "@СОТ | ОМ | Отчет по блогерам","▤"],
           ["Гарантированный охват",number(guaranteed),"план","◉"],
           ["Фактический охват",number(actual),placementSummaryMetricsValue.actualSource,"✓"],
           ["Выручка",money(revenue),placementSummaryMetricsValue.revenueSource,"₽"]
@@ -5045,6 +5085,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=104",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=105",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
