@@ -524,6 +524,16 @@
           data = attachProgramFinanceMetrics(data);
           currentFinanceData = data;
           if (canRenderFinance) renderFinanceCenter(data,Boolean(data.source && data.source.mode === "exact-sheet-cache"));
+          var reportsPage = document.getElementById("page-reports");
+          if (reportsPage && reportsPage.classList.contains("active")) {
+            renderMonthlyPlanFact();
+            renderMonthlyControlSummary();
+          }
+          var dashboardPage = document.getElementById("page-dashboard");
+          if (dashboardPage && dashboardPage.classList.contains("active")) {
+            renderKpis();
+            renderDashboardMonthSummary();
+          }
           return data;
         }).catch(function () {
           currentFinanceData = null;
@@ -1409,7 +1419,7 @@
         return officialDirectionOverrideMetric(month,direction,id);
       }
       function applyOfficialDirectionMetrics(item,month) {
-        var fields = ["clicks","leads","sales","revenue"];
+        var fields = ["reach","clicks","leads","sales","revenue"];
         var applied = [];
         fields.forEach(function (field) {
           var value = officialDirectionMetric(month,item.direction,field);
@@ -1420,7 +1430,7 @@
           }
           if (value == null || value < 0) return;
           item[field] = value;
-          applied.push(field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
+          applied.push(field === "reach" ? "фактический охват" : field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
         });
         if (applied.length) item.source = String(item.source || "Выходы") + " · Google Sheets: " + applied.join(", ");
         return item;
@@ -5030,6 +5040,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=102",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=103",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
