@@ -220,6 +220,44 @@ test("assistant outreach in leader profile uses fact field",() => {
   assert.equal(activity.approvals,3);
 });
 
+test("outreach summaries calculate replies refusals approvals and response conversion by day and month",() => {
+  const context = {
+    Object,Number,String,Math,
+    dailyManagerReports:{
+      "2026-08-10":{Manager:{planOutreach:120,outreach:100,replies:10,refusals:4,approvals:2}},
+      "2026-08-11":{Manager:{planOutreach:120,outreach:50,replies:5,refusals:2,approvals:1}},
+    },
+    dailyAssistantReports:{
+      "2026-08-10":{Assistant:{manager:"Manager",plan:80,fact:40,replies:8,refusals:3,approvals:2}},
+      "2026-08-11":{Assistant:{manager:"Manager",plan:80,fact:60,replies:12,refusals:4,approvals:3}},
+    },
+    employeeNamedRecord:(records,name) => records[name] || null,
+    employeeMetricRecord:() => ({planOutreach:120}),
+    rate:(numerator,denominator) => denominator > 0 ? numerator / denominator * 100 : 0,
+  };
+  const manager = runFunction("managerOutreachSummary",context)("Manager","2026-08","2026-08-10");
+  assert.deepEqual(
+    [manager.dayFact,manager.dayReplies,manager.dayRefusals,manager.dayApprovals,manager.dayResponseRate],
+    [100,10,4,2,10]
+  );
+  assert.deepEqual(
+    [manager.monthFact,manager.monthReplies,manager.monthRefusals,manager.monthApprovals,manager.monthResponseRate],
+    [150,15,6,3,10]
+  );
+  const assistant = runFunction("assistantOutreachSummary",context)("Assistant","2026-08","2026-08-10");
+  assert.deepEqual(
+    [assistant.dayFact,assistant.dayReplies,assistant.dayRefusals,assistant.dayApprovals,assistant.dayResponseRate],
+    [40,8,3,2,20]
+  );
+  assert.deepEqual(
+    [assistant.monthFact,assistant.monthReplies,assistant.monthRefusals,assistant.monthApprovals,assistant.monthResponseRate],
+    [100,20,7,5,20]
+  );
+  assert.match(source,/Конверсия в ответ за день/);
+  assert.match(source,/Конверсия в ответ за месяц/);
+  assert.match(source,/Согласованные блогеры/);
+});
+
 const salaryRules = {
   categories:{a:{min:1000,max:3000},b:{min:3000,max:5000},c:{min:5000,max:null}},
   bloggerAmounts:{manager:{a:500,b:2700,c:5000},assistant:{a:250,b:1350,c:2500}},

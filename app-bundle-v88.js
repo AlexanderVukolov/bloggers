@@ -26,6 +26,16 @@
 
   var outreachGrid = document.getElementById("dashboardOutreachKpis");
   if (outreachGrid) outreachGrid.insertAdjacentHTML("beforebegin", '<div class="card card-pad leader-only" id="departmentOutreachPlanEditor" style="margin-bottom:12px"><div class="card-title"><div><h3>План рассылок отдела</h3><p>Администратор вручную задаёт план на выбранный день и на весь месяц</p></div><span class="badge badge-blue" id="departmentOutreachPlanMonth">Текущий месяц</span></div><div class="form-grid"><div class="field"><label>План на день</label><input class="input" id="departmentOutreachDayPlan" type="number" min="0" step="1" value="0"></div><div class="field"><label>План на месяц</label><input class="input" id="departmentOutreachMonthPlan" type="number" min="0" step="1" value="0"></div></div><p class="evidence-note">План хранится отдельно от факта. Факт всегда складывается только из сохранённых дневных отчётов менеджеров и ассистентов.</p></div>');
+  var dashboardManagerHeader = document.getElementById("dashboardMonthManagers");
+  if (dashboardManagerHeader) {
+    dashboardManagerHeader.closest("table").style.minWidth = "2100px";
+    dashboardManagerHeader.closest("table").querySelector("thead tr").innerHTML = '<th>Менеджер</th><th>День: план / факт рассылок</th><th>День: ответы / отказы / согласовано</th><th>Конверсия в ответ за день</th><th>Месяц: план / факт рассылок</th><th>Месяц: ответы / отказы / согласовано</th><th>Конверсия в ответ за месяц</th><th>Выходы: план / факт</th><th>Охват: план / факт</th><th>Гарант / факт интеграций</th><th>Выполнение охвата</th><th>Выручка: план / факт</th><th>Выполнение выручки</th>';
+  }
+  var dashboardAssistantHeader = document.getElementById("dashboardAssistantOutreach");
+  if (dashboardAssistantHeader) {
+    dashboardAssistantHeader.closest("table").style.minWidth = "1540px";
+    dashboardAssistantHeader.closest("table").querySelector("thead tr").innerHTML = '<th>Ассистент</th><th>Закреплён за</th><th>День</th><th>День: план / факт</th><th>День: ответы / отказы / согласовано</th><th>Конверсия в ответ за день</th><th>Месяц: план / факт</th><th>Месяц: ответы / отказы / согласовано</th><th>Конверсия в ответ за месяц</th>';
+  }
 
   var bloggerImportStrip = document.getElementById("bloggerImportMeta");
   if (bloggerImportStrip) bloggerImportStrip.closest(".import-strip").insertAdjacentHTML("afterend", '<article class="card card-pad leader-only" id="newBloggersMonthSection" style="margin-top:12px"><div class="card-title"><div><h3>Новые блогеры месяца</h3><p>Список формируется по дате добавления карточки, а не по дате выхода</p></div><span class="badge badge-green" id="newBloggersMonthCount">0</span></div><div class="table-wrap"><table style="min-width:880px"><thead><tr><th>Блогер</th><th>Ссылка</th><th>Статус</th><th>Направление</th><th>Ответственный</th><th>Добавил</th><th>Дата добавления</th></tr></thead><tbody id="newBloggersMonthTable"></tbody></table></div></article>');
@@ -53,6 +63,11 @@
     if (dailySummaryButton) dailySummaryButton.insertAdjacentHTML("afterend", '<button class="segment" data-report-view="summary">Сводка за месяц</button>');
     var dailySummaryView = document.getElementById("report-view-daily");
     if (dailySummaryView) dailySummaryView.insertAdjacentHTML("afterend", '<div class="report-view hidden" id="report-view-summary"><div class="report-section-head"><div><h3>Месячная сводка</h3><p>Ежедневные отчёты и результаты размещений за выбранный месяц</p></div><div class="actions"><input class="input" id="monthlyControlMonth" type="month" style="width:auto"><select class="select" id="monthlyControlEmployee" style="width:auto"><option value="all">Все сотрудники</option></select><span class="badge badge-green" id="monthlyControlPeriod">Текущий месяц</span></div></div><div class="grid manager-kpis" id="monthlyControlKpis"></div><div class="report-section-head"><div><h3>Сотрудники</h3><p>Менеджеры и ассистенты в одной месячной сводке</p></div></div><div class="card table-card"><div class="table-wrap"><table style="min-width:1840px"><thead><tr><th>Сотрудник</th><th>Роль</th><th>Дней с отчётом</th><th>План / факт рассылок</th><th>Ответы</th><th>Согласия</th><th>Новые блогеры</th><th>Передано менеджеру</th><th>Выходы</th><th>Гарант</th><th>Факт охвата</th><th>% плана охвата</th><th>Клики</th><th>Продажи</th><th>Выручка</th></tr></thead><tbody id="monthlyControlTable"></tbody></table></div><div class="table-note">Дневные показатели суммируются из сохранённых отчётов. Выходы, гарант, охват, клики, продажи и выручка берутся из единого реестра размещений. Данные удалённых сотрудников остаются в истории.</div></div></div>');
+    var monthlyControlHeader = document.getElementById("monthlyControlTable");
+    if (monthlyControlHeader) {
+      monthlyControlHeader.closest("table").style.minWidth = "2040px";
+      monthlyControlHeader.closest("table").querySelector("thead tr").innerHTML = '<th>Сотрудник</th><th>Роль</th><th>Дней с отчётом</th><th>План / факт рассылок</th><th>Ответы</th><th>Отказы</th><th>Согласованные блогеры</th><th>Конверсия в ответ</th><th>Новые блогеры</th><th>Передано менеджеру</th><th>Выходы</th><th>Гарант</th><th>Факт охвата</th><th>% плана охвата</th><th>Клики</th><th>Продажи</th><th>Выручка</th>';
+    }
   }
 
   var financeNavButton = document.querySelector('[data-page="finance"]');
@@ -1321,7 +1336,7 @@
       }
       function monthlyControlDaily(name,month,kind) {
         var source = kind === "manager" ? dailyManagerReports : dailyAssistantReports;
-        var result = {days:0,plan:0,fact:0,replies:0,approvals:0,transferred:0};
+        var result = {days:0,plan:0,fact:0,replies:0,refusals:0,approvals:0,transferred:0};
         Object.keys(source).filter(function (date) { return date.slice(0,7) === month; }).forEach(function (date) {
           var item = employeeNamedRecord(source[date] || {},name);
           if (!item) return;
@@ -1329,6 +1344,7 @@
           result.plan += Math.max(0,Number(kind === "manager" ? item.planOutreach : item.plan || 0));
           result.fact += Math.max(0,Number(kind === "manager" ? item.outreach : item.fact || 0));
           result.replies += Math.max(0,Number(item.replies || 0));
+          result.refusals += Math.max(0,Number(item.refusals || 0));
           result.approvals += Math.max(0,Number(item.approvals || 0));
           result.transferred += Math.max(0,Number(item.transferred || 0));
         });
@@ -1372,9 +1388,9 @@
         });
 
         var communication = rows.reduce(function (total,row) {
-          ["plan","fact","replies","approvals","newBloggers"].forEach(function (field) { total[field] += Number(row.daily[field] || 0); });
+          ["plan","fact","replies","refusals","approvals","newBloggers"].forEach(function (field) { total[field] += Number(row.daily[field] || 0); });
           return total;
-        },{plan:0,fact:0,replies:0,approvals:0,newBloggers:0});
+        },{plan:0,fact:0,replies:0,refusals:0,approvals:0,newBloggers:0});
         var selectedManager = selected !== "all" && rows.length && rows[0].kind === "manager" ? rows[0].name : "";
         var directionPlacement = ["ЛН","FIT PRO"].map(function (direction) {
           if (selected !== "all" && !selectedManager) return {direction:direction,exits:0,guaranteed:0,reach:0,clicks:0,sales:0,revenue:0};
@@ -1395,7 +1411,9 @@
         var cards = [
           ["Рассылки за месяц",number(communication.fact),"план " + number(communication.plan),rate(communication.fact,communication.plan),"↗"],
           ["Ответы",number(communication.replies),percent(rate(communication.replies,communication.fact),1) + " от рассылок",rate(communication.replies,communication.fact),"◎"],
-          ["Согласия",number(communication.approvals),percent(rate(communication.approvals,communication.replies),1) + " от ответов",rate(communication.approvals,communication.replies),"✓"],
+          ["Отказы",number(communication.refusals),"накопительно за месяц",communication.refusals ? 100 : 0,"×"],
+          ["Согласованные блогеры",number(communication.approvals),percent(rate(communication.approvals,communication.replies),1) + " от ответов",rate(communication.approvals,communication.replies),"✓"],
+          ["Конверсия в ответ",percent(rate(communication.replies,communication.fact),1),number(communication.replies) + " ответов из " + number(communication.fact) + " рассылок",rate(communication.replies,communication.fact),"%"],
           ["Новые блогеры",number(communication.newBloggers),"добавлены за месяц",communication.newBloggers ? 100 : 0,"＋"],
           ["Выходы за месяц",number(placement.exits),"подтверждённые размещения",placement.exits ? 100 : 0,"▶"],
           ["Гарант охвата",number(placement.guaranteed),"из выходов",rate(placement.reach,placement.guaranteed),"◌"],
@@ -1409,8 +1427,9 @@
           var daily = row.daily, fact = row.fact, plan = row.plan;
           var reachPct = rate(fact.reach,plan.reach);
           var historical = employeeByName(row.name) ? "Активный сотрудник" : "Исторические данные";
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(row.name) + '</div><div><strong>' + safeText(row.name) + '</strong><small>' + historical + '</small></div></div></td><td><span class="badge ' + (row.kind === "manager" ? "badge-blue" : "badge-purple") + '">' + (row.kind === "manager" ? "Менеджер" : "Ассистент") + '</span></td><td><b>' + number(daily.days) + '</b></td><td><b>' + number(daily.plan) + ' / ' + number(daily.fact) + '</b></td><td>' + number(daily.replies) + '</td><td>' + number(daily.approvals) + '</td><td><b>' + number(daily.newBloggers) + '</b></td><td>' + number(daily.transferred) + '</td><td><b>' + number(fact.exits) + '</b></td><td>' + number(fact.guaranteed) + '</td><td><b>' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + number(fact.clicks) + '</td><td>' + number(fact.sales) + '</td><td><b>' + money(fact.revenue) + '</b></td></tr>';
-        }).join("") || '<tr><td colspan="15"><div class="empty-state">За выбранный месяц данных нет.</div></td></tr>';
+          var responsePct = rate(daily.replies,daily.fact);
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(row.name) + '</div><div><strong>' + safeText(row.name) + '</strong><small>' + historical + '</small></div></div></td><td><span class="badge ' + (row.kind === "manager" ? "badge-blue" : "badge-purple") + '">' + (row.kind === "manager" ? "Менеджер" : "Ассистент") + '</span></td><td><b>' + number(daily.days) + '</b></td><td><b>' + number(daily.plan) + ' / ' + number(daily.fact) + '</b></td><td>' + number(daily.replies) + '</td><td>' + number(daily.refusals) + '</td><td><b>' + number(daily.approvals) + '</b></td><td><span class="' + metricState(responsePct,10) + '">' + percent(responsePct,1) + '</span></td><td><b>' + number(daily.newBloggers) + '</b></td><td>' + number(daily.transferred) + '</td><td><b>' + number(fact.exits) + '</b></td><td>' + number(fact.guaranteed) + '</td><td><b>' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + number(fact.clicks) + '</td><td>' + number(fact.sales) + '</td><td><b>' + money(fact.revenue) + '</b></td></tr>';
+        }).join("") || '<tr><td colspan="17"><div class="empty-state">За выбранный месяц данных нет.</div></td></tr>';
       }
 
       function renderMonthlyPlanFact() {
@@ -1566,14 +1585,20 @@
       function managerOutreachSummary(manager,month,date) {
         var daily = employeeNamedRecord(dailyManagerReports[date] || {},manager) || {};
         var metricRecord = employeeMetricRecord(manager);
-        return Object.keys(dailyManagerReports).filter(function (itemDate) { return itemDate.slice(0,7) === month; }).reduce(function (total,itemDate) {
+        var summary = Object.keys(dailyManagerReports).filter(function (itemDate) { return itemDate.slice(0,7) === month; }).reduce(function (total,itemDate) {
           var item = employeeNamedRecord(dailyManagerReports[itemDate] || {},manager);
           if (item) {
             total.monthPlan += Number(item.planOutreach || metricRecord.planOutreach || 150);
             total.monthFact += Number(item.outreach || 0);
+            total.monthReplies += Number(item.replies || 0);
+            total.monthRefusals += Number(item.refusals || 0);
+            total.monthApprovals += Number(item.approvals || 0);
           }
           return total;
-        },{dayPlan:Number(daily.planOutreach || metricRecord.planOutreach || 150),dayFact:Number(daily.outreach || 0),monthPlan:0,monthFact:0});
+        },{dayPlan:Number(daily.planOutreach || metricRecord.planOutreach || 150),dayFact:Number(daily.outreach || 0),dayReplies:Number(daily.replies || 0),dayRefusals:Number(daily.refusals || 0),dayApprovals:Number(daily.approvals || 0),monthPlan:0,monthFact:0,monthReplies:0,monthRefusals:0,monthApprovals:0});
+        summary.dayResponseRate = rate(summary.dayReplies,summary.dayFact);
+        summary.monthResponseRate = rate(summary.monthReplies,summary.monthFact);
+        return summary;
       }
       function reportedEmployeeNamesForMonth(reportMap,month) {
         var found = {};
@@ -1589,15 +1614,21 @@
       }
       function assistantOutreachSummary(name,month,date) {
         var daily = employeeNamedRecord(dailyAssistantReports[date] || {},name) || {};
-        return Object.keys(dailyAssistantReports).filter(function (itemDate) { return itemDate.slice(0,7) === month; }).reduce(function (total,itemDate) {
+        var summary = Object.keys(dailyAssistantReports).filter(function (itemDate) { return itemDate.slice(0,7) === month; }).reduce(function (total,itemDate) {
           var item = employeeNamedRecord(dailyAssistantReports[itemDate] || {},name);
           if (item) {
             total.monthPlan += Number(item.plan || 0);
             total.monthFact += Number(item.fact || 0);
+            total.monthReplies += Number(item.replies || 0);
+            total.monthRefusals += Number(item.refusals || 0);
+            total.monthApprovals += Number(item.approvals || 0);
             if (item.manager) total.manager = item.manager;
           }
           return total;
-        },{manager:daily.manager || "Не назначен",dayPlan:Number(daily.plan || 0),dayFact:Number(daily.fact || 0),monthPlan:0,monthFact:0});
+        },{manager:daily.manager || "Не назначен",dayPlan:Number(daily.plan || 0),dayFact:Number(daily.fact || 0),dayReplies:Number(daily.replies || 0),dayRefusals:Number(daily.refusals || 0),dayApprovals:Number(daily.approvals || 0),monthPlan:0,monthFact:0,monthReplies:0,monthRefusals:0,monthApprovals:0});
+        summary.dayResponseRate = rate(summary.dayReplies,summary.dayFact);
+        summary.monthResponseRate = rate(summary.monthReplies,summary.monthFact);
+        return summary;
       }
       function monthlyDepartmentPlanSetting(month) {
         var monthPlans = monthlyManagerPlans[month] || {};
@@ -1698,12 +1729,14 @@
         var selectedDate = dateSelect.value;
         var assistantNames = assistantOutreachNames(month);
         var assistantSummaries = {};
-        var totals = {planExits:0,factExits:0,planReach:0,guaranteedReach:0,factReach:0,planRevenue:0,factRevenue:0,dayOutreachPlan:0,dayOutreachFact:0,monthOutreachPlan:0,monthOutreachFact:0};
+        var totals = {planExits:0,factExits:0,planReach:0,guaranteedReach:0,factReach:0,planRevenue:0,factRevenue:0,dayOutreachPlan:0,dayOutreachFact:0,dayReplies:0,dayRefusals:0,dayApprovals:0,monthOutreachPlan:0,monthOutreachFact:0,monthReplies:0,monthRefusals:0,monthApprovals:0};
         assistantNames.forEach(function (name) {
           var item = assistantOutreachSummary(name,month,selectedDate);
           assistantSummaries[name] = item;
           totals.dayOutreachPlan += item.dayPlan; totals.dayOutreachFact += item.dayFact;
           totals.monthOutreachPlan += item.monthPlan; totals.monthOutreachFact += item.monthFact;
+          totals.dayReplies += item.dayReplies; totals.dayRefusals += item.dayRefusals; totals.dayApprovals += item.dayApprovals;
+          totals.monthReplies += item.monthReplies; totals.monthRefusals += item.monthRefusals; totals.monthApprovals += item.monthApprovals;
         });
         var rows = managers.map(function (manager) {
           var plan = monthlyPlanSetting(manager,month);
@@ -1714,11 +1747,13 @@
           totals.planRevenue += Number(plan.revenue || 0); totals.factRevenue += Number(fact.revenue || 0);
           totals.dayOutreachPlan += outreach.dayPlan; totals.dayOutreachFact += outreach.dayFact;
           totals.monthOutreachPlan += outreach.monthPlan; totals.monthOutreachFact += outreach.monthFact;
+          totals.dayReplies += outreach.dayReplies; totals.dayRefusals += outreach.dayRefusals; totals.dayApprovals += outreach.dayApprovals;
+          totals.monthReplies += outreach.monthReplies; totals.monthRefusals += outreach.monthRefusals; totals.monthApprovals += outreach.monthApprovals;
           var reachPct = rate(fact.reach,plan.reach);
           var revenuePct = rate(fact.revenue,plan.revenue);
           var dailyOutreachPct = rate(outreach.dayFact,outreach.dayPlan);
           var monthOutreachPct = rate(outreach.monthFact,outreach.monthPlan);
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(manager) + '</div><div><strong>' + safeText(manager) + '</strong><small>Действующий месяц</small></div></div></td><td><b>' + number(outreach.dayPlan) + ' / ' + number(outreach.dayFact) + '</b><small style="display:block" class="' + metricState(dailyOutreachPct,100) + '">' + percent(dailyOutreachPct,1) + '</small></td><td><b>' + number(outreach.monthPlan) + ' / ' + number(outreach.monthFact) + '</b><small style="display:block" class="' + metricState(monthOutreachPct,100) + '">' + percent(monthOutreachPct,1) + '</small></td><td><b>' + number(plan.exits) + ' / ' + number(fact.exits) + '</b></td><td>' + number(plan.reach) + ' / <b>' + number(fact.reach) + '</b></td><td><b>' + number(fact.guaranteed) + ' / ' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + money(plan.revenue) + ' / <b>' + money(fact.revenue) + '</b></td><td><span class="' + metricState(revenuePct,100) + '">' + percent(revenuePct,1) + '</span></td></tr>';
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(manager) + '</div><div><strong>' + safeText(manager) + '</strong><small>Действующий месяц</small></div></div></td><td><b>' + number(outreach.dayPlan) + ' / ' + number(outreach.dayFact) + '</b><small style="display:block" class="' + metricState(dailyOutreachPct,100) + '">' + percent(dailyOutreachPct,1) + '</small></td><td>' + number(outreach.dayReplies) + ' / ' + number(outreach.dayRefusals) + ' / <b>' + number(outreach.dayApprovals) + '</b></td><td><span class="' + metricState(outreach.dayResponseRate,10) + '">' + percent(outreach.dayResponseRate,1) + '</span></td><td><b>' + number(outreach.monthPlan) + ' / ' + number(outreach.monthFact) + '</b><small style="display:block" class="' + metricState(monthOutreachPct,100) + '">' + percent(monthOutreachPct,1) + '</small></td><td>' + number(outreach.monthReplies) + ' / ' + number(outreach.monthRefusals) + ' / <b>' + number(outreach.monthApprovals) + '</b></td><td><span class="' + metricState(outreach.monthResponseRate,10) + '">' + percent(outreach.monthResponseRate,1) + '</span></td><td><b>' + number(plan.exits) + ' / ' + number(fact.exits) + '</b></td><td>' + number(plan.reach) + ' / <b>' + number(fact.reach) + '</b></td><td><b>' + number(fact.guaranteed) + ' / ' + number(fact.reach) + '</b></td><td><span class="' + metricState(reachPct,100) + '">' + percent(reachPct,1) + '</span></td><td>' + money(plan.revenue) + ' / <b>' + money(fact.revenue) + '</b></td><td><span class="' + metricState(revenuePct,100) + '">' + percent(revenuePct,1) + '</span></td></tr>';
         });
         reportedEmployeeNamesForMonth(dailyManagerReports,month).filter(function (name) {
           return !managers.some(function (activeName) { return employeeNameMatches(activeName,name); });
@@ -1726,6 +1761,8 @@
           var outreach = managerOutreachSummary(name,month,selectedDate);
           totals.dayOutreachPlan += outreach.dayPlan; totals.dayOutreachFact += outreach.dayFact;
           totals.monthOutreachPlan += outreach.monthPlan; totals.monthOutreachFact += outreach.monthFact;
+          totals.dayReplies += outreach.dayReplies; totals.dayRefusals += outreach.dayRefusals; totals.dayApprovals += outreach.dayApprovals;
+          totals.monthReplies += outreach.monthReplies; totals.monthRefusals += outreach.monthRefusals; totals.monthApprovals += outreach.monthApprovals;
         });
         reportedEmployeeNamesForMonth(dailyAssistantReports,month).filter(function (name) {
           return !assistantNames.some(function (activeName) { return employeeNameMatches(activeName,name); });
@@ -1733,6 +1770,8 @@
           var outreach = assistantOutreachSummary(name,month,selectedDate);
           totals.dayOutreachPlan += outreach.dayPlan; totals.dayOutreachFact += outreach.dayFact;
           totals.monthOutreachPlan += outreach.monthPlan; totals.monthOutreachFact += outreach.monthFact;
+          totals.dayReplies += outreach.dayReplies; totals.dayRefusals += outreach.dayRefusals; totals.dayApprovals += outreach.dayApprovals;
+          totals.monthReplies += outreach.monthReplies; totals.monthRefusals += outreach.monthRefusals; totals.monthApprovals += outreach.monthApprovals;
         });
         var directionFacts = [monthlyDirectionFact(month,"ЛН"),monthlyDirectionFact(month,"FIT PRO")];
         var departmentPlan = monthlyDepartmentPlanSetting(month);
@@ -1769,20 +1808,31 @@
         var outreachCards = [
           {label:"План рассылок за день",value:number(totals.dayOutreachPlan),foot:"все сотрудники",pct:100,icon:"↗"},
           {label:"Факт рассылок за день",value:number(totals.dayOutreachFact),foot:"из " + number(totals.dayOutreachPlan),pct:rate(totals.dayOutreachFact,totals.dayOutreachPlan),icon:"✓"},
+          {label:"Ответы за день",value:number(totals.dayReplies),foot:"за " + dailyDateLabel(selectedDate),pct:rate(totals.dayReplies,totals.dayOutreachFact),target:10,progressLabel:"Ответы / рассылки",icon:"◎"},
+          {label:"Отказы за день",value:number(totals.dayRefusals),foot:"за " + dailyDateLabel(selectedDate),pct:0,neutral:true,progressLabel:"За выбранную дату",icon:"×"},
+          {label:"Согласованные за день",value:number(totals.dayApprovals),foot:"блогеров",pct:rate(totals.dayApprovals,totals.dayReplies),target:35,progressLabel:"Согласовано / ответы",icon:"✓"},
+          {label:"Конверсия в ответ за день",value:percent(rate(totals.dayReplies,totals.dayOutreachFact),1),foot:number(totals.dayReplies) + " из " + number(totals.dayOutreachFact),pct:rate(totals.dayReplies,totals.dayOutreachFact),target:10,progressLabel:"Ответы / рассылки",icon:"%"},
           {label:"План рассылок за месяц",value:number(totals.monthOutreachPlan),foot:"накопительный план",pct:100,icon:"◫"},
-          {label:"Факт рассылок за месяц",value:number(totals.monthOutreachFact),foot:"из " + number(totals.monthOutreachPlan),pct:rate(totals.monthOutreachFact,totals.monthOutreachPlan),icon:"◎"}
+          {label:"Факт рассылок за месяц",value:number(totals.monthOutreachFact),foot:"из " + number(totals.monthOutreachPlan),pct:rate(totals.monthOutreachFact,totals.monthOutreachPlan),icon:"◎"},
+          {label:"Ответы за месяц",value:number(totals.monthReplies),foot:"накопительным итогом",pct:rate(totals.monthReplies,totals.monthOutreachFact),target:10,progressLabel:"Ответы / рассылки",icon:"◎"},
+          {label:"Отказы за месяц",value:number(totals.monthRefusals),foot:"накопительным итогом",pct:0,neutral:true,progressLabel:"Накопительный итог",icon:"×"},
+          {label:"Согласованные за месяц",value:number(totals.monthApprovals),foot:"блогеров накопительно",pct:rate(totals.monthApprovals,totals.monthReplies),target:35,progressLabel:"Согласовано / ответы",icon:"✓"},
+          {label:"Конверсия в ответ за месяц",value:percent(rate(totals.monthReplies,totals.monthOutreachFact),1),foot:number(totals.monthReplies) + " из " + number(totals.monthOutreachFact),pct:rate(totals.monthReplies,totals.monthOutreachFact),target:10,progressLabel:"Ответы / рассылки",icon:"%"}
         ];
         document.getElementById("dashboardOutreachKpis").innerHTML = outreachCards.map(function (card) {
-          return '<article class="kpi" style="border:1px solid var(--line);border-radius:14px"><div class="kpi-top"><span>' + card.label + '</span><span class="kpi-icon">' + card.icon + '</span></div><div class="kpi-value">' + card.value + '</div><div class="kpi-foot"><span class="' + metricState(card.pct,100) + '">' + percent(card.pct,1) + '</span> · ' + card.foot + '</div><div class="plan-row"><div><span>Факт / план</span><span>' + percent(card.pct,0) + '</span></div><div class="progress"><i style="width:' + Math.min(100,card.pct) + '%"></i></div></div></article>';
+          var target = card.target || 100;
+          var width = card.neutral ? 0 : Math.min(100,card.pct / target * 100);
+          var state = card.neutral ? "trend-warn" : metricState(card.pct,target);
+          return '<article class="kpi" style="border:1px solid var(--line);border-radius:14px"><div class="kpi-top"><span>' + card.label + '</span><span class="kpi-icon">' + card.icon + '</span></div><div class="kpi-value">' + card.value + '</div><div class="kpi-foot"><span class="' + state + '">' + (card.neutral ? "Факт" : percent(card.pct,1)) + '</span> · ' + card.foot + '</div><div class="plan-row"><div><span>' + (card.progressLabel || "Факт / план") + '</span><span>' + (card.neutral ? card.value : percent(card.pct,0)) + '</span></div><div class="progress"><i style="width:' + width + '%"></i></div></div></article>';
         }).join("");
         document.getElementById("dashboardMonthManagers").innerHTML = rows.join("");
         var assistantRows = assistantNames.map(function (name) {
           var item = assistantSummaries[name];
           var dayPct = rate(item.dayFact,item.dayPlan);
           var monthPct = rate(item.monthFact,item.monthPlan);
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(name) + '</div><div><strong>' + safeText(name) + '</strong><small>Ассистент</small></div></div></td><td>' + safeText(item.manager) + '</td><td><b>' + dailyDateLabel(selectedDate) + '</b></td><td><b>' + number(item.dayPlan) + ' / ' + number(item.dayFact) + '</b></td><td><span class="' + metricState(dayPct,100) + '">' + percent(dayPct,1) + '</span></td><td><b>' + number(item.monthPlan) + ' / ' + number(item.monthFact) + '</b></td><td><span class="' + metricState(monthPct,100) + '">' + percent(monthPct,1) + '</span></td></tr>';
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(name) + '</div><div><strong>' + safeText(name) + '</strong><small>Ассистент</small></div></div></td><td>' + safeText(item.manager) + '</td><td><b>' + dailyDateLabel(selectedDate) + '</b></td><td><b>' + number(item.dayPlan) + ' / ' + number(item.dayFact) + '</b><small style="display:block" class="' + metricState(dayPct,100) + '">' + percent(dayPct,1) + '</small></td><td>' + number(item.dayReplies) + ' / ' + number(item.dayRefusals) + ' / <b>' + number(item.dayApprovals) + '</b></td><td><span class="' + metricState(item.dayResponseRate,10) + '">' + percent(item.dayResponseRate,1) + '</span></td><td><b>' + number(item.monthPlan) + ' / ' + number(item.monthFact) + '</b><small style="display:block" class="' + metricState(monthPct,100) + '">' + percent(monthPct,1) + '</small></td><td>' + number(item.monthReplies) + ' / ' + number(item.monthRefusals) + ' / <b>' + number(item.monthApprovals) + '</b></td><td><span class="' + metricState(item.monthResponseRate,10) + '">' + percent(item.monthResponseRate,1) + '</span></td></tr>';
         });
-        document.getElementById("dashboardAssistantOutreach").innerHTML = assistantRows.length ? assistantRows.join("") : '<tr><td colspan="7"><div class="empty-state">За текущий месяц отчёты ассистентов ещё не заполнены.</div></td></tr>';
+        document.getElementById("dashboardAssistantOutreach").innerHTML = assistantRows.length ? assistantRows.join("") : '<tr><td colspan="9"><div class="empty-state">За текущий месяц отчёты ассистентов ещё не заполнены.</div></td></tr>';
         document.getElementById("dashboardAssistantMonthBadge").textContent = activeMonthLabel(month);
         managers.forEach(function (manager) {
           var outreach = managerOutreachSummary(manager,month,selectedDate);
@@ -5307,6 +5357,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=107",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=108",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
