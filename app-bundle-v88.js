@@ -376,7 +376,9 @@
               var value = officialDirectionOverrideMetric(entry.month,directionName,id);
               if (value != null) setMetricFact(metrics,id,value,"Подтверждённый факт");
             });
-            if (metricFact(metrics,"costs") == null) setMetricFact(metrics,"costs",Number(costFallback.fact || 0),"Размещения · резервный источник");
+            var placementCosts = Number(costFallback && costFallback.fact || 0);
+            if (Number.isFinite(placementCosts) && placementCosts > 0) setMetricFact(metrics,"costs",placementCosts,"Размещения · фактические затраты");
+            else if (metricFact(metrics,"costs") == null) setMetricFact(metrics,"costs",0,"Размещения · затраты не указаны");
             recalculateEfficiency(metrics);
           }
           attachDirection(directions.ln,lnFact,lnCost,"ЛН");
@@ -4833,6 +4835,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=95",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=96",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
