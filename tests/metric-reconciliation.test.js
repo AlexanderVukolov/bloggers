@@ -85,38 +85,44 @@ test("finance keeps sheet costs and recalculates exits, ROI and ROMI",() => {
     synchronizedPlacementRecords:() => [],placementDirection:() => "ЛН",monthFromDateValue:() => "",bloggers:[],
     monthlyDirectionFact:(month,direction) => facts[direction],
   };
-  ["programOutreachMetric","programDirectionCostMetric","attachProgramFinanceMetrics"].forEach(name => {
+  ["programOutreachMetric","programDirectionCostMetric","officialDirectionOverrideMetric","attachProgramFinanceMetrics"].forEach(name => {
     vm.createContext(context);
     vm.runInContext(extractFunction(name),context);
   });
   const data = {current:{month:"2026-08",directions:{
-    ln:{metrics:{revenue:{fact:3000},costs:{fact:1000},paidBudget:{fact:500}}},
-    fit:{metrics:{revenue:{fact:1000},costs:{fact:500},paidBudget:{fact:250}}},
-  },combined:{metrics:{revenue:{fact:4000},costs:{fact:1500},paidBudget:{fact:750}}}}};
+    ln:{metrics:{sales:{fact:2},revenue:{fact:3000},costs:{fact:1000},paidBudget:{fact:500}}},
+    fit:{metrics:{sales:{fact:7},revenue:{fact:1000},costs:{fact:500},paidBudget:{fact:250}}},
+  },combined:{metrics:{sales:{fact:9},revenue:{fact:4000},costs:{fact:1500},paidBudget:{fact:750}}}}};
   context.attachProgramFinanceMetrics(data);
   assert.equal(data.current.directions.ln.metrics.costs.fact,1000);
   assert.equal(data.current.directions.ln.metrics.exits.fact,2);
   assert.equal(data.current.directions.ln.metrics.roi.fact,200);
   assert.equal(data.current.directions.ln.metrics.romi.fact,500);
   assert.equal(data.current.combined.metrics.exits.fact,3);
+  assert.equal(data.current.directions.fit.metrics.sales.fact,1);
+  assert.equal(data.current.directions.fit.metrics.revenue.fact,39900);
+  assert.equal(data.current.combined.metrics.sales.fact,3);
+  assert.equal(data.current.combined.metrics.revenue.fact,42900);
   assert.equal(data.current.combined.metrics.costs.fact,1500);
-  assert.equal(data.current.combined.metrics.roi.fact,(4000-1500)/1500*100);
+  assert.equal(data.current.combined.metrics.roi.fact,(42900-1500)/1500*100);
 });
 
-test("dashboard direction uses leads, sales and revenue from the matching sheet",() => {
+test("FIT PRO uses the confirmed August sale in every summary",() => {
   const context = {
     Object,Number,String,Math,
     currentFinanceData:{current:{month:"2026-08",directions:{fit:{metrics:{leads:{fact:41},sales:{fact:7},revenue:{fact:910000}}}}}},
     monthlyDepartmentPlanSetting:() => ({}),
   };
-  ["financeEntryForMonth","officialDirectionMetric","applyOfficialDirectionMetrics"].forEach(name => {
+  ["financeEntryForMonth","officialDirectionOverrideMetric","officialDirectionMetric","applyOfficialDirectionMetrics","placementOfficialRevenue"].forEach(name => {
     vm.createContext(context);
     vm.runInContext(extractFunction(name),context);
   });
   const direction = context.applyOfficialDirectionMetrics({direction:"FIT PRO",leads:1,sales:1,revenue:1,source:"Выходы"},"2026-08");
   assert.equal(direction.leads,41);
-  assert.equal(direction.sales,7);
-  assert.equal(direction.revenue,910000);
+  assert.equal(direction.sales,1);
+  assert.equal(direction.revenue,39900);
+  assert.equal(context.placementOfficialRevenue("2026-08","FIT PRO"),39900);
+  assert.equal(context.officialDirectionOverrideMetric("2026-07","FIT PRO","revenue"),null);
   assert.match(direction.source,/Google Sheets/);
 });
 

@@ -366,22 +366,32 @@
             var marketingCosts = paidBudget > 0 ? paidBudget : costs;
             setMetricFact(metrics,"romi",marketingCosts > 0 && revenue != null ? (revenue - marketingCosts) / marketingCosts * 100 : null,"Выручка и маркетинговые затраты");
           }
-          function attachDirection(directionEntry,fact,costFallback) {
+          function attachDirection(directionEntry,fact,costFallback,directionName) {
             if (!directionEntry) return;
             var metrics = directionEntry.metrics || (directionEntry.metrics = {});
             metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
             setMetricFact(metrics,"exits",Number(fact.exits || 0),"Главная · единый реестр выходов");
             setMetricFact(metrics,"clicks",Number(fact.clicks || 0),"Выходы и подтверждённые отчёты");
+            ["sales","revenue"].forEach(function (id) {
+              var value = officialDirectionOverrideMetric(entry.month,directionName,id);
+              if (value != null) setMetricFact(metrics,id,value,"Подтверждённый факт");
+            });
             if (metricFact(metrics,"costs") == null) setMetricFact(metrics,"costs",Number(costFallback.fact || 0),"Размещения · резервный источник");
             recalculateEfficiency(metrics);
           }
-          attachDirection(directions.ln,lnFact,lnCost);
-          attachDirection(directions.fit,fitFact,fitCost);
+          attachDirection(directions.ln,lnFact,lnCost,"ЛН");
+          attachDirection(directions.fit,fitFact,fitCost,"FIT PRO");
           if (entry.combined) {
             var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
             entry.combined.metrics.outreach = programOutreachMetric(entry.month);
             setMetricFact(combinedMetrics,"exits",Number(lnFact.exits || 0) + Number(fitFact.exits || 0),"Главная · ЛН + FIT PRO");
             setMetricFact(combinedMetrics,"clicks",Number(lnFact.clicks || 0) + Number(fitFact.clicks || 0),"Выходы и подтверждённые отчёты");
+            ["sales","revenue"].forEach(function (id) {
+              var values = [directions.ln,directions.fit].map(function (item) { return metricFact(item && item.metrics,id); });
+              if (values.every(function (value) { return value != null; })) {
+                setMetricFact(combinedMetrics,id,values.reduce(function (sum,value) { return sum + value; },0),"Финансовая таблица · ЛН + FIT PRO");
+              }
+            });
             var directionCosts = [directions.ln,directions.fit].reduce(function (sum,item) {
               var value = metricFact(item && item.metrics,"costs");
               if (value != null) { sum.value += value; sum.found = true; }
@@ -1243,7 +1253,17 @@
         var entries = (currentFinanceData.archive || []).concat(currentFinanceData.current ? [currentFinanceData.current] : []);
         return entries.find(function (entry) { return entry && entry.month === month; }) || null;
       }
+      function officialDirectionOverrideMetric(month,direction,id) {
+        var monthFacts = {
+          "2026-08":{"FIT PRO":{sales:1,revenue:39900}}
+        };
+        var directionFacts = monthFacts[month] && monthFacts[month][direction];
+        var value = directionFacts && directionFacts[id];
+        return value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+      }
       function officialDirectionMetric(month,direction,id) {
+        var override = officialDirectionOverrideMetric(month,direction,id);
+        if (override != null) return override;
         var entry = financeEntryForMonth(month);
         var key = direction === "FIT PRO" ? "fit" : "ln";
         var metric = entry && entry.directions && entry.directions[key] && entry.directions[key].metrics && entry.directions[key].metrics[id];
@@ -3009,7 +3029,8 @@
           var financeKey = value === "FIT PRO" ? "fit" : "ln";
           var financeRevenue = financeCurrent && financeCurrent.directions && financeCurrent.directions[financeKey] && financeCurrent.directions[financeKey].metrics && financeCurrent.directions[financeKey].metrics.revenue;
           var fallbackValue = value === "FIT PRO" ? departmentPlan.revenueFitFact : departmentPlan.revenueLnFact;
-          var sourceValue = financeRevenue && financeRevenue.fact != null ? financeRevenue.fact : fallbackValue;
+          var overrideValue = officialDirectionOverrideMetric(month,value,"revenue");
+          var sourceValue = overrideValue != null ? overrideValue : financeRevenue && financeRevenue.fact != null ? financeRevenue.fact : fallbackValue;
           if (sourceValue == null || sourceValue === "" || !Number.isFinite(Number(sourceValue)) || Number(sourceValue) < 0) return null;
           return Number(sourceValue);
         }
@@ -4832,6 +4853,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=93",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=94",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
