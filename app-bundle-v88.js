@@ -369,7 +369,8 @@
             var metrics = directionEntry.metrics || (directionEntry.metrics = {});
             metrics.outreach = {plan:null,fact:null,progress:null,source:"Сводная метрика отдела"};
             setMetricFact(metrics,"exits",Number(fact.exits || 0),"Главная · единый реестр выходов");
-            setMetricFact(metrics,"clicks",Number(fact.clicks || 0),"Выходы и подтверждённые отчёты");
+            var sheetClicks = metricFact(metrics,"clicks");
+            setMetricFact(metrics,"clicks",sheetClicks,"@СОТ | ОМ | Отчет по блогерам · " + (directionName === "FIT PRO" ? "Отчет FIT PRO" : "Отчет ЛН"));
             ["sales","revenue"].forEach(function (id) {
               var value = officialDirectionOverrideMetric(entry.month,directionName,id);
               if (value != null) setMetricFact(metrics,id,value,"Подтверждённый факт");
@@ -384,7 +385,12 @@
             var combinedMetrics = entry.combined.metrics || (entry.combined.metrics = {});
             entry.combined.metrics.outreach = programOutreachMetric(entry.month);
             setMetricFact(combinedMetrics,"exits",Number(lnFact.exits || 0) + Number(fitFact.exits || 0),"Главная · ЛН + FIT PRO");
-            setMetricFact(combinedMetrics,"clicks",Number(lnFact.clicks || 0) + Number(fitFact.clicks || 0),"Выходы и подтверждённые отчёты");
+            var directionClicks = [directions.ln,directions.fit].reduce(function (sum,item) {
+              var value = metricFact(item && item.metrics,"clicks");
+              if (value != null) { sum.value += value; sum.found = true; }
+              return sum;
+            },{value:0,found:false});
+            setMetricFact(combinedMetrics,"clicks",directionClicks.found ? directionClicks.value : null,"@СОТ | ОМ | Отчет по блогерам · ЛН + FIT PRO");
             ["sales","revenue"].forEach(function (id) {
               var values = [directions.ln,directions.fit].map(function (item) { return metricFact(item && item.metrics,id); });
               if (values.every(function (value) { return value != null; })) {
@@ -498,23 +504,34 @@
         renderFinanceArchive(data.archive || []);
       }
       function hydrateFinanceCenter() {
-        if (role !== "leader") return Promise.resolve();
+        var canRenderFinance = role === "leader";
         var button = document.getElementById("refreshFinanceBtn");
-        button.disabled = true;
-        document.getElementById("financeSyncStatus").textContent = "Обновляю…";
+        if (button && canRenderFinance) button.disabled = true;
+        var status = document.getElementById("financeSyncStatus");
+        if (status && canRenderFinance) status.textContent = "Обновляю…";
         return apiFetch("/api/finance-summary",{headers:{"cache-control":"no-store","x-nsl-role":role}}).then(function (response) {
           if (!response.ok) throw new Error("finance sync failed");
           return response.json();
-        }).then(function (data) { data = attachProgramFinanceMetrics(data); renderFinanceCenter(data,Boolean(data.source && data.source.mode === "exact-sheet-cache")); }).catch(function () {
+        }).then(function (data) {
+          data = attachProgramFinanceMetrics(data);
+          currentFinanceData = data;
+          if (canRenderFinance) renderFinanceCenter(data,Boolean(data.source && data.source.mode === "exact-sheet-cache"));
+          return data;
+        }).catch(function () {
           currentFinanceData = null;
-          renderFinanceKpis(null);
-          document.getElementById("financeSyncStatus").className = "badge badge-red";
-          document.getElementById("financeSyncStatus").textContent = "Ошибка обновления";
-          document.getElementById("financeDirectionCards").innerHTML = "";
-          document.getElementById("financeMetricsTable").innerHTML = "";
-          renderFinanceTrend(null);
-          document.getElementById("financeSourceNote").textContent = "Не удалось получить актуальные данные. Нажмите «Обновить» ещё раз.";
-        }).finally(function () { button.disabled = false; });
+          if (canRenderFinance) {
+            renderFinanceKpis(null);
+            if (status) {
+              status.className = "badge badge-red";
+              status.textContent = "Ошибка обновления";
+            }
+            document.getElementById("financeDirectionCards").innerHTML = "";
+            document.getElementById("financeMetricsTable").innerHTML = "";
+            renderFinanceTrend(null);
+            document.getElementById("financeSourceNote").textContent = "Не удалось получить актуальные данные. Нажмите «Обновить» ещё раз.";
+          }
+          return null;
+        }).finally(function () { if (button && canRenderFinance) button.disabled = false; });
       }
       function metricState(value, target, warningShare) {
         if (value >= target) return "trend-up";
@@ -1253,23 +1270,22 @@
       }
       function officialDirectionOverrideMetric(month,direction,id) {
         var monthFacts = {
-          "2026-08":{"FIT PRO":{sales:1,revenue:39900}}
+          "2026-08":{"ЛН":{clicks:1962},"FIT PRO":{clicks:537,sales:1,revenue:39900}}
         };
         var directionFacts = monthFacts[month] && monthFacts[month][direction];
         var value = directionFacts && directionFacts[id];
         return value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
       }
       function officialDirectionMetric(month,direction,id) {
-        var override = officialDirectionOverrideMetric(month,direction,id);
-        if (override != null) return override;
         var entry = financeEntryForMonth(month);
         var key = direction === "FIT PRO" ? "fit" : "ln";
         var metric = entry && entry.directions && entry.directions[key] && entry.directions[key].metrics && entry.directions[key].metrics[id];
         var value = metric && metric.fact;
-        return value != null && value !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
+        if (value != null && value !== "" && Number.isFinite(Number(value))) return Number(value);
+        return officialDirectionOverrideMetric(month,direction,id);
       }
       function applyOfficialDirectionMetrics(item,month) {
-        var fields = ["leads","sales","revenue"];
+        var fields = ["clicks","leads","sales","revenue"];
         var applied = [];
         fields.forEach(function (field) {
           var value = officialDirectionMetric(month,item.direction,field);
@@ -1280,7 +1296,7 @@
           }
           if (value == null || value < 0) return;
           item[field] = value;
-          applied.push(field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
+          applied.push(field === "clicks" ? "клики" : field === "leads" ? "лиды" : field === "sales" ? "продажи" : "выручка");
         });
         if (applied.length) item.source = String(item.source || "Выходы") + " · Google Sheets: " + applied.join(", ");
         return item;
@@ -3888,8 +3904,8 @@
           loginScreen.classList.add("hidden");
           appShell.classList.remove("hidden");
           return hydrateSharedState({full:true}).then(function () {
-            var tasks = [hydrateReachActuals(),hydrateDepartmentMonths(),hydrateEmployees(),hydratePlacementSchedules(),hydrateEvidenceReports()];
-            if (appRole === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(systemMonthKey()),hydrateFinanceCenter());
+            var tasks = [hydrateReachActuals(),hydrateDepartmentMonths(),hydrateEmployees(),hydratePlacementSchedules(),hydrateEvidenceReports(),hydrateFinanceCenter()];
+            if (appRole === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(systemMonthKey()));
             return Promise.allSettled(tasks);
           }).then(function (results) {
             try { setRole(appRole); }
@@ -4831,6 +4847,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=97",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=98",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

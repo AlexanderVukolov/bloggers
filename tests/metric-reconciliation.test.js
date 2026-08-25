@@ -75,7 +75,7 @@ test("one blogger and date count as one exit while distinct formats add reach",(
   });
 });
 
-test("finance uses only the two project sheets for costs and ROI",() => {
+test("finance uses the two project sheets for clicks, costs and ROI",() => {
   const facts = {"ЛН":{exits:2,clicks:20},"FIT PRO":{exits:1,clicks:10}};
   const context = {
     Object,Number,String,Math,
@@ -94,10 +94,13 @@ test("finance uses only the two project sheets for costs and ROI",() => {
     vm.runInContext(extractFunction(name),context);
   });
   const data = {current:{month:"2026-08",directions:{
-    ln:{metrics:{sales:{fact:19},revenue:{fact:1012022},costs:{fact:360220},paidBudget:{fact:241840}}},
-    fit:{metrics:{sales:{fact:7},revenue:{fact:1000},costs:{fact:null},paidBudget:{fact:0}}},
-  },combined:{metrics:{sales:{fact:26},revenue:{fact:1013022},costs:{fact:360220},paidBudget:{fact:241840}}}}};
+    ln:{metrics:{clicks:{fact:1962},sales:{fact:19},revenue:{fact:1012022},costs:{fact:360220},paidBudget:{fact:241840}}},
+    fit:{metrics:{clicks:{fact:537},sales:{fact:7},revenue:{fact:1000},costs:{fact:null},paidBudget:{fact:0}}},
+  },combined:{metrics:{clicks:{fact:999},sales:{fact:26},revenue:{fact:1013022},costs:{fact:360220},paidBudget:{fact:241840}}}}};
   context.attachProgramFinanceMetrics(data);
+  assert.equal(data.current.directions.ln.metrics.clicks.fact,1962);
+  assert.equal(data.current.directions.fit.metrics.clicks.fact,537);
+  assert.equal(data.current.combined.metrics.clicks.fact,2499);
   assert.equal(data.current.directions.ln.metrics.costs.fact,360220);
   assert.equal(data.current.directions.ln.metrics.roi.fact,(1012022-360220)/360220*100);
   assert.equal(data.current.directions.fit.metrics.sales.fact,1);
@@ -113,15 +116,16 @@ test("finance uses only the two project sheets for costs and ROI",() => {
 test("FIT PRO uses the confirmed August sale in every summary",() => {
   const context = {
     Object,Number,String,Math,
-    currentFinanceData:{current:{month:"2026-08",directions:{fit:{metrics:{leads:{fact:41},sales:{fact:7},revenue:{fact:910000}}}}}},
+    currentFinanceData:{current:{month:"2026-08",directions:{fit:{metrics:{clicks:{fact:537},leads:{fact:5},sales:{fact:1},revenue:{fact:39900}}}}}},
     monthlyDepartmentPlanSetting:() => ({}),
   };
   ["financeEntryForMonth","officialDirectionOverrideMetric","officialDirectionMetric","applyOfficialDirectionMetrics","placementOfficialRevenue"].forEach(name => {
     vm.createContext(context);
     vm.runInContext(extractFunction(name),context);
   });
-  const direction = context.applyOfficialDirectionMetrics({direction:"FIT PRO",leads:1,sales:1,revenue:1,source:"Выходы"},"2026-08");
-  assert.equal(direction.leads,41);
+  const direction = context.applyOfficialDirectionMetrics({direction:"FIT PRO",clicks:1,leads:1,sales:1,revenue:1,source:"Выходы"},"2026-08");
+  assert.equal(direction.clicks,537);
+  assert.equal(direction.leads,5);
   assert.equal(direction.sales,1);
   assert.equal(direction.revenue,39900);
   assert.equal(context.placementOfficialRevenue("2026-08","FIT PRO"),39900);
@@ -296,4 +300,9 @@ test("guaranteed reach on dashboard is the exact sum of canonical exit rows",() 
   const directionFact = runFunction("monthlyDirectionFact",context);
   assert.equal(managerFact("Manager A","2026-08").guaranteed,560000);
   assert.equal(directionFact("2026-08","ЛН").guaranteed,560000);
+});
+
+test("all roles hydrate official Google Sheets metrics",() => {
+  assert.match(source,/hydrateEvidenceReports\(\),hydrateFinanceCenter\(\)/);
+  assert.match(source,/var fields = \["clicks","leads","sales","revenue"\]/);
 });
