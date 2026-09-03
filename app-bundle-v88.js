@@ -44,7 +44,7 @@
   if (kpiCalculatorView) {
     kpiCalculatorView.insertAdjacentHTML("afterbegin", '<article class="card card-pad" id="kpiReachPlanSection" style="margin-bottom:16px"><div class="card-title"><div><h3>План по охвату</h3><p>Отдельный план и факт охвата по каждому менеджеру</p></div><span class="badge badge-blue" id="kpiReachPlanMonth">Текущий месяц</span></div><div class="table-wrap"><table style="min-width:760px"><thead><tr><th>Менеджер</th><th>План охвата</th><th>Подтверждённый факт</th><th>Выполнение</th></tr></thead><tbody id="kpiReachPlanTable"></tbody></table></div></article>');
     var rosterHeading = document.getElementById("kpiBloggerRosterTable").closest("article").querySelector(".card-title div");
-    if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI новых блогеров</h3><p>Все карточки, добавленные менеджером или ассистентом в выбранном месяце, попадают в список автоматически. Администратор может уточнить охват и ответственного.</p>';
+    if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI новых блогеров</h3><p>Для менеджера KPI начисляется только по блогерам, добавленным в выбранном календарном месяце, если до конца этого же месяца подтверждены дата выхода и фактический охват.</p>';
   }
 
   var salaryTable = document.getElementById("salaryTable");
@@ -52,7 +52,7 @@
     var salaryHeaders = salaryTable.closest("table").querySelectorAll("thead th");
     ["Кат. A","Кат. B","Кат. C"].forEach(function (label,index) { if (salaryHeaders[index + 3]) salaryHeaders[index + 3].textContent = label; });
     var salaryNote = salaryTable.closest(".card").querySelector(".table-note");
-    if (salaryNote) salaryNote.textContent = "Оклад и KPI рассчитываются автоматически по новым блогерам и фактическому охвату. Администратор может изменить оклад, KPI за охват и санкции за выбранный месяц.";
+    if (salaryNote) salaryNote.textContent = "Оклад и KPI рассчитываются автоматически. Для менеджеров учитываются только новые блогеры с подтверждённым выходом и фактом охвата внутри календарного месяца. Администратор может изменить оклад, KPI за охват и санкции.";
     var salarySummary = document.getElementById("salarySummaryGrid");
     salarySummary.insertAdjacentHTML("afterend", '<article class="card card-pad" id="salaryPolicyCard" style="margin-bottom:16px"><div class="card-title"><div><h3>Правила начисления</h3><p>Категория определяется по охвату нового блогера; на границе 3000 начинается B, на границе 5000 — C</p></div><span class="badge badge-green">Считается автоматически</span></div><div class="grid grid-2"><div class="quality-item"><div><strong>Менеджеры · KPI за блогеров</strong><small>A: 1 000–2 999 — 500 ₽ · B: 3 000–4 999 — 2 700 ₽ · C: от 5 000 — 5 000 ₽</small></div></div><div class="quality-item"><div><strong>Ассистенты · KPI за блогеров</strong><small>A: 1 000–2 999 — 250 ₽ · B: 3 000–4 999 — 1 350 ₽ · C: от 5 000 — 2 500 ₽</small></div></div><div class="quality-item" style="grid-column:1/-1"><div><strong>Менеджеры · KPI за выполнение плана охвата</strong><small>70–79,99% — 6 000 ₽ · 80–89,99% — 10 000 ₽ · 90–99,99% — 15 000 ₽ · 100% и выше — 20 000 ₽</small></div></div></div></article>');
   }
@@ -2803,8 +2803,39 @@
       function newBloggersForMonth(month) {
         return bloggers.filter(function (blogger) { return monthFromDateValue(blogger.createdAt) === month; }).sort(function (a,b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); });
       }
+      function confirmedKpiExitForBlogger(blogger,month) {
+        var byDate = {};
+        synchronizedPlacementRecords().filter(function (item) {
+          return placementMatchesBlogger(item,blogger) && monthFromDateValue(placementIsoDate(item)) === month;
+        }).forEach(function (item) {
+          var date = placementIsoDate(item);
+          if (!date) return;
+          if (!byDate[date]) byDate[date] = {placement:0,evidence:0};
+          var facts = placementFormatActuals[placementOverrideKey(item)] || {};
+          var splitActual = Object.keys(facts).reduce(function (sum,format) {
+            var value = Number(facts[format]);
+            return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+          },0);
+          var directActual = effectivePlacementActual(item);
+          var confirmedActual = Math.max(splitActual,directActual != null && directActual > 0 && !item._cardSyncedActual ? directActual : 0);
+          byDate[date].placement += confirmedActual;
+        });
+        evidenceReports.filter(function (report) {
+          return monthFromDateValue(report.date) === month && (!report.status || report.status === "Подтверждено") && placementMatchesBlogger({tag:report.blogger,bloggerLink:report.blogger},blogger);
+        }).forEach(function (report) {
+          var date = String(report.date || "");
+          var reach = Number(report.reach || 0);
+          if (!date || !Number.isFinite(reach) || reach <= 0 || reach > MAX_BLOGGER_REACH) return;
+          if (!byDate[date]) byDate[date] = {placement:0,evidence:0};
+          byDate[date].evidence = Math.max(byDate[date].evidence,reach);
+        });
+        var dates = Object.keys(byDate).filter(function (date) { return Math.max(byDate[date].placement,byDate[date].evidence) > 0; }).sort();
+        var factReach = dates.reduce(function (sum,date) { return sum + Math.max(byDate[date].placement,byDate[date].evidence); },0);
+        return {eligible:factReach > 0,factReach:Math.round(factReach),dates:dates};
+      }
       function automaticKpiMonthBloggers(month) {
         return newBloggersForMonth(month).map(function (blogger) {
+          var confirmedExit = confirmedKpiExitForBlogger(blogger,month);
           return {
             month:month,
             bloggerKey:String(blogger.id),
@@ -2812,7 +2843,10 @@
             manager:blogger.manager || (blogger.createdByRole === "manager" ? blogger.createdByName || "" : "") || "Не назначен",
             assistant:blogger.createdByRole === "assistant" ? blogger.createdByName || "" : "",
             factReach:Math.max(0,Number(blogger.reach || 0)),
-            note:"Добавлен автоматически по дате создания",
+            managerFactReach:confirmedExit.factReach,
+            managerEligible:confirmedExit.eligible,
+            confirmedExitDates:confirmedExit.dates,
+            note:confirmedExit.eligible ? "Подтверждённый выход: " + confirmedExit.dates.map(dailyDateLabel).join(", ") : "Ожидается подтверждённый выход и факт охвата до конца месяца",
             automatic:true
           };
         });
@@ -2893,12 +2927,12 @@
       function bloggerKpiForEmployee(employeeOrName,roleName,month) {
         var records = resolvedKpiMonthBloggers(month).filter(function (item) {
           var responsible = roleName === "assistant" ? item.assistant : item.manager;
-          return responsible && salaryEmployeeNameMatches(employeeOrName,responsible);
+          return responsible && salaryEmployeeNameMatches(employeeOrName,responsible) && (roleName !== "manager" || item.managerEligible === true);
         });
         var counts = {a:0,b:0,c:0};
         var factReach = 0;
         records.forEach(function (item) {
-          var reach = Math.max(0,Number(item.factReach || 0));
+          var reach = Math.max(0,Number(roleName === "manager" ? item.managerFactReach || 0 : item.factReach || 0));
           var category = salaryBloggerCategory(reach);
           factReach += reach;
           if (category) counts[category] += 1;
@@ -3010,8 +3044,9 @@
           var open = blogger ? ' data-open-blogger="' + safeText(blogger.id) + '"' : '';
           var responsibility = safeText(item.manager) + (item.assistant ? '<small style="display:block">Добавил ассистент: ' + safeText(item.assistant) + '</small>' : '');
           var action = item.automatic ? '<span class="badge badge-green">Добавлен автоматически</span>' : '<button class="btn btn-sm btn-outline" type="button" data-remove-kpi-blogger="' + safeText(item.bloggerKey) + '" data-kpi-month="' + safeText(item.month) + '">Удалить</button>';
-          var kpiRole = item.assistant ? "assistant" : "manager";
-          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + responsibility + '</td><td><b>' + number(item.factReach) + '</b></td><td><span class="badge badge-blue">' + safeText(kpiReachCategory(item.factReach,kpiRole)) + '</span></td><td>' + safeText(item.note || '—') + '</td><td>' + action + '</td></tr>';
+          var managerReach = Math.max(0,Number(item.managerFactReach || 0));
+          var category = item.managerEligible ? kpiReachCategory(managerReach,"manager") : "Не подтверждён";
+          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + responsibility + '</td><td><b>' + (item.managerEligible ? number(managerReach) : '—') + '</b></td><td><span class="badge ' + (item.managerEligible ? 'badge-blue' : 'badge-amber') + '">' + safeText(category) + '</span></td><td>' + safeText(item.note || '—') + '</td><td>' + action + '</td></tr>';
         }).join("") || '<tr><td colspan="7"><div class="empty-state">В ' + kpiMonthLabel(month).toLowerCase() + ' новые блогеры ещё не добавлены.</div></td></tr>';
       }
       function populateKpiControls() {
@@ -5379,6 +5414,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=110",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=111",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

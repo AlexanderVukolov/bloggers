@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v110-september-reports";
+const CACHE_NAME = "nsl-bloggers-github-v111-manager-kpi-confirmed-exits";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,

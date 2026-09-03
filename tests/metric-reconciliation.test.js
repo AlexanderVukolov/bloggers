@@ -185,6 +185,33 @@ test("FIT PRO uses the confirmed August sale in every summary",() => {
   assert.match(direction.source,/Google Sheets/);
 });
 
+test("confirmed manager KPI reach is tied to exit dates inside the blogger creation month",() => {
+  const blogger = {id:1,name:"@new_blogger"};
+  const context = {
+    Object,Number,String,Math,MAX_BLOGGER_REACH:1000000000,
+    synchronizedPlacementRecords:() => [
+      {id:10,tag:"@new_blogger",sortDate:"2026-08-20",actual:2500},
+      {id:11,tag:"@new_blogger",sortDate:"2026-09-01",actual:9000},
+      {id:12,tag:"@other",sortDate:"2026-08-20",actual:7000},
+    ],
+    placementMatchesBlogger:(item) => item.tag === "@new_blogger",
+    monthFromDateValue:value => String(value || "").slice(0,7),
+    placementIsoDate:item => item.sortDate,
+    placementFormatActuals:{},
+    placementOverrideKey:item => String(item.id),
+    effectivePlacementActual:item => item.actual,
+    evidenceReports:[
+      {blogger:"@new_blogger",date:"2026-08-20",reach:3000,status:"Подтверждено"},
+      {blogger:"@new_blogger",date:"2026-08-25",reach:500,status:"Подтверждено"},
+      {blogger:"@new_blogger",date:"2026-09-01",reach:10000,status:"Подтверждено"},
+    ],
+  };
+  const result = runFunction("confirmedKpiExitForBlogger",context)(blogger,"2026-08");
+  assert.equal(result.eligible,true);
+  assert.equal(result.factReach,3500);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.dates)),["2026-08-20","2026-08-25"]);
+});
+
 test("all bloggers created in the month are present in KPI and a manual row only refines data",() => {
   const context = {
     Object,Number,String,Math,
@@ -194,6 +221,8 @@ test("all bloggers created in the month are present in KPI and a manual row only
       {id:3,name:"old",display:"Old",createdAt:"2026-07-03T10:00:00Z",manager:"Manager",reach:300},
     ],
     monthFromDateValue:value => String(value || "").slice(0,7),
+    confirmedKpiExitForBlogger:blogger => blogger.id === 1 ? {eligible:true,factReach:1200,dates:["2026-08-20"]} : {eligible:false,factReach:0,dates:[]},
+    dailyDateLabel:value => value,
     kpiMonthBloggers:[{month:"2026-08",bloggerKey:"1",bloggerName:"One",manager:"Manager",factReach:150,note:"checked"}],
   };
   ["newBloggersForMonth","automaticKpiMonthBloggers","resolvedKpiMonthBloggers"].forEach(name => {
@@ -203,6 +232,8 @@ test("all bloggers created in the month are present in KPI and a manual row only
   const records = context.resolvedKpiMonthBloggers("2026-08").sort((a,b) => a.bloggerKey.localeCompare(b.bloggerKey));
   assert.equal(records.length,2);
   assert.equal(records[0].factReach,150);
+  assert.equal(records[0].managerFactReach,1200);
+  assert.equal(records[0].managerEligible,true);
   assert.equal(records[0].assistant,"Assistant");
   assert.equal(records[0].automatic,true);
   assert.equal(records[1].bloggerName,"Two");
@@ -320,6 +351,37 @@ test("blogger KPI boundaries use B from 3000 and C from 5000",() => {
   assert.equal(context.reachKpiAmount(100),20000);
 });
 
+test("manager blogger KPI uses only new bloggers with confirmed exit reach inside the same calendar month",() => {
+  const context = {
+    Object,Number,String,Math,SALARY_RULES:salaryRules,
+    resolvedKpiMonthBloggers:() => [
+      {manager:"Manager",factReach:9000,managerFactReach:3500,managerEligible:true},
+      {manager:"Manager",factReach:12000,managerFactReach:0,managerEligible:false},
+      {manager:"Other",factReach:5000,managerFactReach:5000,managerEligible:true},
+    ],
+    employeeNameMatches:(expected,actual) => expected === actual,
+    salaryProfileForName:() => null,
+    normalizedSalaryNameTokens:value => String(value || "").toLowerCase().split(/\s+/),
+  };
+  ["salaryBloggerCategory","salaryBloggerAmount","salaryEmployeeNameMatches","bloggerKpiForEmployee"].forEach(name => {
+    vm.createContext(context);
+    vm.runInContext(extractFunction(name),context);
+  });
+  const result = context.bloggerKpiForEmployee("Manager","manager","2026-08");
+  assert.deepEqual([result.a,result.b,result.c],[0,1,0]);
+  assert.equal(result.factReach,3500);
+  assert.equal(result.amount,2700);
+  assert.equal(result.records,1);
+});
+
+test("manager KPI backend consolidates technical duplicate blogger cards",() => {
+  assert.match(apiSource,/function kpiCardGroupKey\(cardKey: string, card: any\)/);
+  assert.match(apiSource,/const consolidatedCards: Record<string, any> = \{\}/);
+  assert.match(apiSource,/for \(const \[key, card\] of Object\.entries\(consolidatedCards\)\)/);
+  assert.match(apiSource,/const managerFactReach = confirmedExitDates\.reduce/);
+  assert.match(apiSource,/managerEligible: managerFactReach > 0/);
+});
+
 test("Sudarynova assistant KPI uses the August roster and assistant category amounts",() => {
   const setting = {base:0,sanctions:{"2026-08":0},manualReachKpi:{}};
   const context = {
@@ -356,7 +418,7 @@ test("Sudarynova assistant KPI uses the August roster and assistant category amo
   assert.equal(result.totalKpi,13500);
   assert.equal(result.salary,28500);
   assert.match(apiSource,/from\("blogger_shared_state"\)/);
-  assert.match(apiSource,/\["blogger_create", "blogger"\]/);
+  assert.match(apiSource,/\["blogger_create", "blogger", "placement"\]/);
   assert.match(apiSource,/assistant: card\.createdByRole === "assistant"/);
 });
 

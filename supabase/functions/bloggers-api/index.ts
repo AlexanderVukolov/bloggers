@@ -72,6 +72,39 @@ function employeePayload(row: any, role: string) {
 
 function writable(role: string) { return role === "leader" || role === "manager" || role === "assistant"; }
 function systemMonth() { const now = new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`; }
+function kpiIdentity(value: unknown) {
+  let text = String(value || "").trim().toLowerCase();
+  text = text.replace(/^(ig|tg|vk):/, "");
+  text = text.replace(/^https?:\/\/(?:www\.)?(?:instagram\.com|t\.me|vk\.com|vk\.ru)\//, "");
+  return text.split(/[?#]/)[0].replace(/^@/, "").replace(/\/+$/, "");
+}
+function kpiCardGroupKey(cardKey: string, card: any) {
+  const id = Number(card?.id);
+  const manuallyCreated = Boolean(card?.createdAt && Number.isFinite(id) && id >= 1577836800000 && id < 2208988800000);
+  if (manuallyCreated) return `created:${card.id}`;
+  return kpiIdentity(card?.sourceKey || card?.link || card?.name || card?.display) || `id:${card?.id ?? cardKey}`;
+}
+function kpiNextMonth(month: string) {
+  const year = Number(month.slice(0, 4));
+  const monthNumber = Number(month.slice(5, 7));
+  return new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
+}
+function kpiPlacementDate(item: any) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(item?.sortDate || ""))) return String(item.sortDate);
+  const match = String(item?.start || "").match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  return match ? `${match[3]}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}` : "";
+}
+function kpiPlacementKey(item: any) {
+  return ["placement-v2", item?.sourceKey || item?.tag || "", item?.sortDate || item?.start || "", item?.type || "", item?.dealType || "", item?.id == null ? "" : item.id].join("|");
+}
+function kpiPlacementMatchesCard(item: any, cardKey: string, card: any) {
+  const cardKeys = [cardKey, card?.id, ...(Array.isArray(card?._kpiKeys) ? card._kpiKeys : []), ...(Array.isArray(card?.duplicateSourceIds) ? card.duplicateSourceIds : [])].filter((value) => value != null).map(String);
+  if (item?.bloggerId != null && cardKeys.includes(String(item.bloggerId))) return true;
+  if (cardKeys.some((key) => String(item?.sourceKey || "") === `blogger-${key}`)) return true;
+  const placementIdentities = [item?.sourceKey, item?.tag, item?.bloggerLink, item?.platform].map(kpiIdentity).filter(Boolean);
+  const cardIdentities = [card?.sourceKey, card?.name, card?.display, card?.link].map(kpiIdentity).filter(Boolean);
+  return placementIdentities.some((identity) => cardIdentities.includes(identity));
+}
 function routePath(url: URL) {
   const marker = "/bloggers-api";
   const index = url.pathname.lastIndexOf(marker);
@@ -479,28 +512,89 @@ Deno.serve(async (request: Request) => {
     const month = String(url.searchParams.get("month") || "");
     if (request.method === "GET") {
       if (!/^\d{4}-\d{2}$/.test(month)) return json(request, { error: "Не указан отчётный месяц" }, 400);
-      const [{ data: manualRows, error: manualError }, { data: sharedRows, error: sharedError }] = await Promise.all([
+      const [
+        { data: manualRows, error: manualError },
+        { data: sharedRows, error: sharedError },
+        { data: reachRows, error: reachError },
+        { data: evidenceRows, error: evidenceError },
+      ] = await Promise.all([
         admin.from("blogger_kpi_month_bloggers").select("*").eq("month", month).order("updated_at", { ascending: false }),
-        admin.from("blogger_shared_state").select("namespace,record_key,value_json,updated_at").in("namespace", ["blogger_create", "blogger"]).order("updated_at"),
+        admin.from("blogger_shared_state").select("namespace,record_key,value_json,updated_at").in("namespace", ["blogger_create", "blogger", "placement"]).order("updated_at"),
+        admin.from("blogger_reach_actuals").select("placement_key,blogger_key,actual,facts_json,updated_at"),
+        admin.from("blogger_evidence_reports").select("blogger,exit_date,reach,status").gte("exit_date", `${month}-01`).lt("exit_date", `${kpiNextMonth(month)}-01`),
       ]);
-      if (manualError || sharedError) return json(request, { error: manualError?.message || sharedError?.message }, 500);
+      if (manualError || sharedError || reachError || evidenceError) return json(request, { error: manualError?.message || sharedError?.message || reachError?.message || evidenceError?.message }, 500);
       const cardsByKey: Record<string, any> = {};
       for (const row of sharedRows || []) {
+        if (row.namespace === "placement") continue;
         const key = String(row.record_key || row.value_json?.id || "");
         if (!key) continue;
         cardsByKey[key] = { ...(cardsByKey[key] || {}), ...(row.value_json || {}) };
       }
+      const consolidatedCards: Record<string, any> = {};
+      for (const [cardKey, card] of Object.entries(cardsByKey)) {
+        const groupKey = kpiCardGroupKey(cardKey, card);
+        const previous = consolidatedCards[groupKey];
+        const candidateRank = String(card.sortDate || card.last || card.createdAt || "");
+        const previousRank = String(previous?.sortDate || previous?.last || previous?.createdAt || "");
+        const preferred = !previous || candidateRank >= previousRank ? { ...previous, ...card } : { ...card, ...previous };
+        const keys = [...(previous?._kpiKeys || []), cardKey, card.id].filter((value, index, values) => value != null && values.map(String).indexOf(String(value)) === index);
+        consolidatedCards[groupKey] = { ...preferred, _kpiKeys: keys };
+      }
+      const placements = (sharedRows || []).filter((row: any) => row.namespace === "placement").map((row: any) => row.value_json || {});
+      const reachByPlacement = new Map((reachRows || []).map((row: any) => [String(row.placement_key), Math.max(0, Number(row.actual || 0))]));
       const result: Record<string, any> = {};
-      for (const [key, card] of Object.entries(cardsByKey)) {
+      for (const [key, card] of Object.entries(consolidatedCards)) {
         if (String(card.createdAt || "").slice(0, 7) !== month) continue;
-        result[key] = {
+        const confirmedByDate: Record<string, { placement: number; evidence: number }> = {};
+        const placementActualsByDate: Record<string, Record<string, number>> = {};
+        for (const placement of placements) {
+          const date = kpiPlacementDate(placement);
+          if (date.slice(0, 7) !== month || !kpiPlacementMatchesCard(placement, key, card)) continue;
+          const directActual = Math.max(0, Number(placement.actual || 0));
+          const savedActual = reachByPlacement.get(kpiPlacementKey(placement)) || 0;
+          const actual = Math.max(directActual, savedActual);
+          if (actual <= 0) continue;
+          const placementIdentity = kpiIdentity(placement.sourceKey || placement.tag || placement.bloggerLink) || String(placement.bloggerId || key);
+          const placementKey = placement.sourcePlacementId != null && placement.sourcePlacementId !== "" ? `source:${placement.sourcePlacementId}` : [placementIdentity, date, String(placement.type || placement.format || "").trim().toLowerCase(), String(placement.dealType || "").trim().toLowerCase()].join("|");
+          if (!placementActualsByDate[date]) placementActualsByDate[date] = {};
+          placementActualsByDate[date][placementKey] = Math.max(placementActualsByDate[date][placementKey] || 0, actual);
+        }
+        for (const [date, actuals] of Object.entries(placementActualsByDate)) {
+          if (!confirmedByDate[date]) confirmedByDate[date] = { placement: 0, evidence: 0 };
+          confirmedByDate[date].placement = Object.values(actuals).reduce((sum, actual) => sum + actual, 0);
+        }
+        const cardIdentities = [card.sourceKey, card.name, card.display, card.link].map(kpiIdentity).filter(Boolean);
+        for (const row of reachRows || []) {
+          const date = String(row.placement_key || "").split("|")[2] || "";
+          if (date.slice(0, 7) !== month || !cardIdentities.includes(kpiIdentity(row.blogger_key))) continue;
+          const actual = Math.max(0, Number(row.actual || 0));
+          if (actual <= 0) continue;
+          if (!confirmedByDate[date]) confirmedByDate[date] = { placement: 0, evidence: 0 };
+          confirmedByDate[date].evidence = Math.max(confirmedByDate[date].evidence, actual);
+        }
+        for (const row of evidenceRows || []) {
+          const date = String(row.exit_date || "");
+          if (date.slice(0, 7) !== month || (row.status && row.status !== "Подтверждено") || !cardIdentities.includes(kpiIdentity(row.blogger))) continue;
+          const reach = Math.max(0, Number(row.reach || 0));
+          if (reach <= 0) continue;
+          if (!confirmedByDate[date]) confirmedByDate[date] = { placement: 0, evidence: 0 };
+          confirmedByDate[date].evidence = Math.max(confirmedByDate[date].evidence, reach);
+        }
+        const confirmedExitDates = Object.keys(confirmedByDate).filter((date) => Math.max(confirmedByDate[date].placement, confirmedByDate[date].evidence) > 0).sort();
+        const managerFactReach = confirmedExitDates.reduce((sum, date) => sum + Math.max(confirmedByDate[date].placement, confirmedByDate[date].evidence), 0);
+        const bloggerKey = String(card.id ?? card._kpiKeys?.[0] ?? key);
+        result[bloggerKey] = {
           month,
-          bloggerKey: key,
+          bloggerKey,
           bloggerName: String(card.display || card.name || "Блогер"),
           manager: String(card.manager || (card.createdByRole === "manager" ? card.createdByName || "" : "") || "Не назначен"),
           assistant: card.createdByRole === "assistant" ? String(card.createdByName || "") : "",
           factReach: Math.max(0, Number(card.reach || 0)),
-          note: "Добавлен автоматически по дате создания",
+          managerFactReach: Math.round(managerFactReach),
+          managerEligible: managerFactReach > 0,
+          confirmedExitDates,
+          note: managerFactReach > 0 ? `Подтверждённый выход: ${confirmedExitDates.join(", ")}` : "Ожидается подтверждённый выход и факт охвата до конца месяца",
           automatic: true,
           updatedAt: card.updatedAt || null,
         };
@@ -516,7 +610,10 @@ Deno.serve(async (request: Request) => {
           manager: row.manager,
           assistant: previous.assistant || "",
           factReach: Number(row.fact_reach || 0),
-          note: row.note || previous.note || "",
+          managerFactReach: Number(previous.manager_fact_reach || previous.managerFactReach || 0),
+          managerEligible: previous.managerEligible === true,
+          confirmedExitDates: previous.confirmedExitDates || [],
+          note: previous.automatic ? previous.note || row.note || "" : row.note || "",
           automatic: Boolean(previous.automatic),
           updatedAt: row.updated_at,
         };
