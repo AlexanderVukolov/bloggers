@@ -68,6 +68,20 @@ function runFunction(name,context) {
   return context.result;
 }
 
+test("placement guarantee is copied from the blogger card and kept separate from actual reach",() => {
+  const guaranteeFor = runFunction("bloggerPlacementGuarantee",{Number,Math});
+  assert.equal(guaranteeFor({plannedReach:12500,reach:9000}),12500);
+  assert.equal(guaranteeFor({plannedReach:0,reach:9000}),0);
+  assert.equal(guaranteeFor({reach:9000}),9000);
+  assert.equal(guaranteeFor({plannedReach:"invalid",reach:9000}),0);
+  assert.match(source,/guaranteeInput\.value = String\(guarantee\)/);
+  assert.match(source,/guaranteed:bloggerPlacementGuarantee\(blogger\)/);
+  assert.match(source,/guaranteed:bloggerPlacementGuarantee\(blogger\),\s*actual:null/);
+  assert.match(source,/plannedReach:Number\(document\.getElementById\("newReach"\)\.value \|\| 0\), reach:0/);
+  assert.match(source,/id="editPlannedReach"/);
+  assert.match(source,/id="createPlacementFromBloggerBtn"/);
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},
