@@ -82,6 +82,21 @@ test("placement guarantee is copied from the blogger card and kept separate from
   assert.match(source,/id="createPlacementFromBloggerBtn"/);
 });
 
+test("actual reach form searches bloggers instead of exposing the long select",() => {
+  const candidates = runFunction("evidenceBloggerCandidates",{
+    String,
+    bloggers:[
+      {name:"@anna_fit",display:"Анна",link:"https://instagram.com/anna_fit",sourceKey:"anna-fit"},
+      {name:"@maria_nsl",display:"Мария",link:"https://instagram.com/maria_nsl",sourceKey:"maria-nsl"},
+    ],
+  })("");
+  assert.ok(candidates.some(item => item.value === "@anna_fit" && item.search.includes("instagram.com/anna_fit")));
+  assert.match(source,/id="evidenceBloggerSearch" type="search"/);
+  assert.match(source,/evidenceBloggerSelect\.classList\.add\("hidden"\)/);
+  assert.match(source,/addEventListener\("input",updateEvidenceBloggerSearch\)/);
+  assert.match(source,/if \(!evidenceBlogger\) return showToast\("Найдите и выберите одного блогера"\)/);
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},
