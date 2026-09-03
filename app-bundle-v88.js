@@ -1490,7 +1490,8 @@
         var active = activeOperationalMonth();
         if (active) return active.month;
         var latest = departmentMonths.slice().sort(function (a,b) { return String(b.month).localeCompare(String(a.month)); })[0];
-        return latest ? latest.month : systemMonthKey();
+        var current = systemMonthKey();
+        return latest && latest.month > current ? latest.month : current;
       }
       function activeMonthLabel(month) {
         var parts = String(month || systemMonthKey()).split("-");
@@ -2881,10 +2882,18 @@
         var roleAmounts = SALARY_RULES.bloggerAmounts[roleName] || {};
         return Number(roleAmounts[category] || 0);
       }
+      function salaryEmployeeNameMatches(employeeOrName,recordName) {
+        if (employeeNameMatches(employeeOrName,recordName)) return true;
+        var expectedName = typeof employeeOrName === "string" ? employeeOrName : employeeOrName && employeeOrName.name;
+        var profile = salaryProfileForName(expectedName || "");
+        if (!profile) return false;
+        var actualTokens = normalizedSalaryNameTokens(recordName);
+        return actualTokens.indexOf(profile.firstName.toLowerCase().replace(/ё/g,"е")) >= 0 && actualTokens.indexOf(profile.lastName.toLowerCase().replace(/ё/g,"е")) >= 0;
+      }
       function bloggerKpiForEmployee(employeeOrName,roleName,month) {
         var records = resolvedKpiMonthBloggers(month).filter(function (item) {
           var responsible = roleName === "assistant" ? item.assistant : item.manager;
-          return responsible && employeeNameMatches(employeeOrName,responsible);
+          return responsible && salaryEmployeeNameMatches(employeeOrName,responsible);
         });
         var counts = {a:0,b:0,c:0};
         var factReach = 0;
@@ -3001,7 +3010,8 @@
           var open = blogger ? ' data-open-blogger="' + safeText(blogger.id) + '"' : '';
           var responsibility = safeText(item.manager) + (item.assistant ? '<small style="display:block">Добавил ассистент: ' + safeText(item.assistant) + '</small>' : '');
           var action = item.automatic ? '<span class="badge badge-green">Добавлен автоматически</span>' : '<button class="btn btn-sm btn-outline" type="button" data-remove-kpi-blogger="' + safeText(item.bloggerKey) + '" data-kpi-month="' + safeText(item.month) + '">Удалить</button>';
-          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + responsibility + '</td><td><b>' + number(item.factReach) + '</b></td><td><span class="badge badge-blue">' + safeText(kpiReachCategory(item.factReach)) + '</span></td><td>' + safeText(item.note || '—') + '</td><td>' + action + '</td></tr>';
+          var kpiRole = item.assistant ? "assistant" : "manager";
+          return '<tr><td><div class="blogger-cell' + (blogger ? ' blogger-card-link' : '') + '"' + open + '><div class="mini-avatar">' + initials(item.bloggerName) + '</div><div><strong>' + safeText(item.bloggerName) + '</strong><small>' + (blogger ? 'Открыть карточку' : 'Карточка не найдена') + '</small></div></div></td><td>' + safeText(kpiMonthLabel(item.month)) + '</td><td>' + responsibility + '</td><td><b>' + number(item.factReach) + '</b></td><td><span class="badge badge-blue">' + safeText(kpiReachCategory(item.factReach,kpiRole)) + '</span></td><td>' + safeText(item.note || '—') + '</td><td>' + action + '</td></tr>';
         }).join("") || '<tr><td colspan="7"><div class="empty-state">В ' + kpiMonthLabel(month).toLowerCase() + ' новые блогеры ещё не добавлены.</div></td></tr>';
       }
       function populateKpiControls() {
@@ -3057,7 +3067,8 @@
           var baseCell = role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.base + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-field="base">' : '<b>' + money(result.base) + '</b>';
           var sanctionCell = hasBloggerKpi ? (role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.sanctions + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-month="' + month + '" data-salary-field="sanctions">' : money(result.sanctions)) : '—';
           var reachKpiCell = isManager ? (role === "leader" ? '<input class="inline-edit-control inline-edit-number" type="number" min="0" value="' + result.reachKpi + '" title="Автоматически: ' + money(result.autoReachKpi) + '" data-salary-employee="' + safeText(employee.id) + '" data-salary-manager="' + safeText(employee.name) + '" data-salary-month="' + month + '" data-salary-field="reachKpi">' : money(result.reachKpi)) : '—';
-          var detail = employeeContractLabel(employee) + (hasBloggerKpi ? ' · ' + result.confirmed + ' блогеров зачтено' + (result.pending ? ' · ' + result.pending + ' ожидают охват' : '') : ' · фиксированный оклад');
+          var categoryDetail = isAssistant ? ' · A: ' + result.a + ' × ' + money(salaryBloggerAmount("assistant","a")) + ' · B: ' + result.b + ' × ' + money(salaryBloggerAmount("assistant","b")) + ' · C: ' + result.c + ' × ' + money(salaryBloggerAmount("assistant","c")) : '';
+          var detail = employeeContractLabel(employee) + (hasBloggerKpi ? ' · ' + result.confirmed + ' блогеров зачтено' + categoryDetail + (result.pending ? ' · ' + result.pending + ' ожидают охват' : '') : ' · фиксированный оклад');
           var status = employee.status === "paused" ? '<span class="badge badge-red">Приостановлен</span>' : '<span class="badge badge-green">Активен</span>';
           return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(employee.name) + '</div><div><strong>' + safeText(employee.name) + '</strong><small>' + detail + '</small></div></div></td><td><span class="badge ' + employeeRoleBadge(employee.role) + '">' + employeeRoleLabel(employee.role) + '</span></td><td>' + baseCell + '</td><td>' + (hasBloggerKpi ? result.a : '—') + '</td><td>' + (hasBloggerKpi ? result.b : '—') + '</td><td>' + (hasBloggerKpi ? result.c : '—') + '</td><td><b>' + (hasBloggerKpi ? number(result.factReach) : '—') + '</b></td><td>' + (isManager ? '<span class="' + metricState(result.reachPct,100,.7) + '">' + percent(result.reachPct,1) + '</span>' : isAssistant ? '<span class="badge badge-purple">Не применяется</span>' : '—') + '</td><td>' + (hasBloggerKpi ? money(result.bloggerKpi) : '—') + '</td><td>' + reachKpiCell + '</td><td>' + sanctionCell + '</td><td><b>' + money(result.totalKpi) + '</b></td><td><b style="color:var(--green-2)">' + money(result.salary) + '</b></td><td>' + status + '</td></tr>';
         });
@@ -4789,13 +4800,18 @@
         var mapping = {Outreach:"outreach",Replies:"replies",Approvals:"approvals",Refusals:"refusals",Dialog:"dialog"};
         var report = {planOutreach:Number(document.getElementById("reportPlanOutreach").value || (managerMetrics[name] || {}).planOutreach || 150),comment:document.getElementById("reportComment").value.trim()};
         Object.keys(mapping).forEach(function (suffix) { report[mapping[suffix]] = Number(document.getElementById("report" + suffix).value || 0); });
-        if (!dailyManagerReports[date]) dailyManagerReports[date] = {};
-        dailyManagerReports[date][name] = report;
-        sessionStorage.setItem("nslDailyManagerReports",JSON.stringify(dailyManagerReports));
-        queueSharedStateRecords([sharedStateRecord("manager_report",date + "|" + name,{date:date,name:name,report:report})]);
-        document.getElementById("managerDailyDateFilter").value = date;
-        document.getElementById("dashboardOutreachDate").dataset.preferredDate = date;
-        renderManagerMetrics(); closeLayers(); showToast("Дневной отчёт за " + dailyDateLabel(date) + " сохранён");
+        var submitButton = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
+        if (submitButton) submitButton.disabled = true;
+        persistSharedStateRecords([sharedStateRecord("manager_report",date + "|" + name,{date:date,name:name,report:report})]).then(function () {
+          if (!dailyManagerReports[date]) dailyManagerReports[date] = {};
+          dailyManagerReports[date][name] = report;
+          sessionStorage.setItem("nslDailyManagerReports",JSON.stringify(dailyManagerReports));
+          document.getElementById("managerDailyDateFilter").value = date;
+          document.getElementById("dashboardOutreachDate").dataset.preferredDate = date;
+          renderManagerMetrics(); closeLayers(); showToast("Дневной отчёт за " + dailyDateLabel(date) + " сохранён в общей базе");
+        }).catch(function (error) {
+          showToast(error.message || "Отчёт не сохранён. Проверьте подключение и повторите");
+        }).finally(function () { if (submitButton) submitButton.disabled = false; });
       });
       document.getElementById("managerMetricsFilter").addEventListener("change", renderManagerMetrics);
       document.getElementById("evidenceEmployeeFilter").addEventListener("change", renderEvidenceReports);
@@ -4817,8 +4833,7 @@
         if (!canEditDailyReports()) return showToast("У вашей роли нет права сохранять ежедневный отчёт");
         var date = document.getElementById("assistantReportDate").value;
         var name = document.getElementById("assistantReportName").value;
-        if (!dailyAssistantReports[date]) dailyAssistantReports[date] = {};
-        dailyAssistantReports[date][name] = {
+        var report = {
           manager:document.getElementById("assistantReportManager").value,
           plan:Number(document.getElementById("assistantReportPlan").value || 0),
           fact:Number(document.getElementById("assistantReportFact").value || 0),
@@ -4829,13 +4844,20 @@
           transferred:Number(document.getElementById("assistantReportTransferred").value || 0),
           comment:document.getElementById("assistantReportComment").value.trim()
         };
-        sessionStorage.setItem("nslDailyAssistantReports",JSON.stringify(dailyAssistantReports));
-        queueSharedStateRecords([sharedStateRecord("assistant_report",date + "|" + name,{date:date,name:name,report:dailyAssistantReports[date][name]})]);
-        document.getElementById("managerDailyDateFilter").value = date;
-        document.getElementById("dashboardOutreachDate").dataset.preferredDate = date;
-        renderManagerMetrics();
-        closeLayers();
-        showToast("Отчёт ассистента за " + dailyDateLabel(date) + " сохранён");
+        var submitButton = event.submitter || event.currentTarget.querySelector('button[type="submit"]');
+        if (submitButton) submitButton.disabled = true;
+        persistSharedStateRecords([sharedStateRecord("assistant_report",date + "|" + name,{date:date,name:name,report:report})]).then(function () {
+          if (!dailyAssistantReports[date]) dailyAssistantReports[date] = {};
+          dailyAssistantReports[date][name] = report;
+          sessionStorage.setItem("nslDailyAssistantReports",JSON.stringify(dailyAssistantReports));
+          document.getElementById("managerDailyDateFilter").value = date;
+          document.getElementById("dashboardOutreachDate").dataset.preferredDate = date;
+          renderManagerMetrics();
+          closeLayers();
+          showToast("Отчёт ассистента за " + dailyDateLabel(date) + " сохранён в общей базе");
+        }).catch(function (error) {
+          showToast(error.message || "Отчёт не сохранён. Проверьте подключение и повторите");
+        }).finally(function () { if (submitButton) submitButton.disabled = false; });
       });
       document.getElementById("managerMonthlyPlanFilter").addEventListener("change", renderMonthlyPlanFact);
       document.getElementById("dashboardOutreachDate").addEventListener("change",renderDashboardMonthSummary);
@@ -5357,6 +5379,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=108",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=110",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

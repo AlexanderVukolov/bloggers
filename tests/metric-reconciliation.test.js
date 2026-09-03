@@ -220,6 +220,16 @@ test("assistant outreach in leader profile uses fact field",() => {
   assert.equal(activity.approvals,3);
 });
 
+test("September daily reports wait for shared database confirmation and current month opens automatically",() => {
+  assert.match(apiSource,/const hasActiveMonth = \(data \|\| \[\]\)\.some\(\(row: any\) => row\.status === "active"\)/);
+  assert.match(apiSource,/if \(!hasActiveMonth && !hasCurrentMonth\)/);
+  assert.match(apiSource,/month_key: currentMonth, status: "active"/);
+  assert.match(source,/return latest && latest\.month > current \? latest\.month : current/);
+  assert.match(source,/persistSharedStateRecords\(\[sharedStateRecord\("manager_report"/);
+  assert.match(source,/persistSharedStateRecords\(\[sharedStateRecord\("assistant_report"/);
+  assert.match(source,/сохранён в общей базе/);
+});
+
 test("outreach summaries calculate replies refusals approvals and response conversion by day and month",() => {
   const context = {
     Object,Number,String,Math,
@@ -310,30 +320,44 @@ test("blogger KPI boundaries use B from 3000 and C from 5000",() => {
   assert.equal(context.reachKpiAmount(100),20000);
 });
 
-test("assistant salary automatically counts only bloggers assigned to the assistant",() => {
-  const setting = {base:0,sanctions:{"2026-08":100},manualReachKpi:{}};
+test("Sudarynova assistant KPI uses the August roster and assistant category amounts",() => {
+  const setting = {base:0,sanctions:{"2026-08":0},manualReachKpi:{}};
   const context = {
     Object,Number,String,Math,SALARY_RULES:salaryRules,
     resolvedKpiMonthBloggers:() => [
-      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:1000},
-      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:3000},
-      {assistant:"Юлия Сударинова",manager:"Оксана Пичушкина",factReach:5000},
+      {assistant:"Сударинова Юлия",factReach:7000},
+      {assistant:"Сударинова Юлия",factReach:13000},
+      {assistant:"Сударинова Юлия",factReach:5000},
+      {assistant:"Сударинова Юлия",factReach:2500},
+      {assistant:"Сударинова Юлия",factReach:40000},
+      {assistant:"Сударинова Юлия",factReach:5000},
+      {assistant:"Сударинова Юлия",factReach:1500},
+      {assistant:"Сударинова Юлия",factReach:0},
+      {assistant:"Сударинова Юлия",factReach:1000},
+      {assistant:"Сударинова Юлия",factReach:2000},
+      {assistant:"Сударинова Юлия",factReach:70},
       {assistant:"Другой ассистент",manager:"Оксана Пичушкина",factReach:9000},
     ],
     employeeNameMatches:(expected,actual) => expected === actual,
+    salaryProfileForName:() => ({firstName:"Юлия",lastName:"Сударинова"}),
+    normalizedSalaryNameTokens:value => String(value || "").toLowerCase().split(/\s+/),
     salarySetting:() => setting,
-    employeeByName:() => ({name:"Юлия Сударинова",baseSalary:15000}),
+    employeeByName:() => ({name:"Сударинова Юлия",baseSalary:15000}),
     effectiveEmployeeBaseSalary:() => 15000,
   };
-  ["salaryBloggerCategory","salaryBloggerAmount","bloggerKpiForEmployee","calculateAssistantSalary"].forEach(name => {
+  ["salaryBloggerCategory","salaryBloggerAmount","salaryEmployeeNameMatches","bloggerKpiForEmployee","calculateAssistantSalary"].forEach(name => {
     vm.createContext(context);
     vm.runInContext(extractFunction(name),context);
   });
-  const result = context.calculateAssistantSalary("Юлия Сударинова","2026-08");
-  assert.deepEqual([result.a,result.b,result.c],[1,1,1]);
-  assert.equal(result.bloggerKpi,4100);
-  assert.equal(result.totalKpi,4000);
-  assert.equal(result.salary,19000);
+  const result = context.calculateAssistantSalary("Сударинова Юлия Айваровна","2026-08");
+  assert.deepEqual([result.a,result.b,result.c],[4,0,5]);
+  assert.equal(result.pending,2);
+  assert.equal(result.bloggerKpi,13500);
+  assert.equal(result.totalKpi,13500);
+  assert.equal(result.salary,28500);
+  assert.match(apiSource,/from\("blogger_shared_state"\)/);
+  assert.match(apiSource,/\["blogger_create", "blogger"\]/);
+  assert.match(apiSource,/assistant: card\.createdByRole === "assistant"/);
 });
 
 test("manager reach KPI uses the individual monthly reach plan",() => {

@@ -479,9 +479,49 @@ Deno.serve(async (request: Request) => {
     const month = String(url.searchParams.get("month") || "");
     if (request.method === "GET") {
       if (!/^\d{4}-\d{2}$/.test(month)) return json(request, { error: "Не указан отчётный месяц" }, 400);
-      const { data, error } = await admin.from("blogger_kpi_month_bloggers").select("*").eq("month", month).order("updated_at", { ascending: false });
-      if (error) return json(request, { error: error.message }, 500);
-      return json(request, { bloggers: (data || []).map((row: any) => ({ month: row.month, bloggerKey: row.blogger_key, bloggerName: row.blogger_name, manager: row.manager, factReach: Number(row.fact_reach || 0), note: row.note || "", updatedAt: row.updated_at })) });
+      const [{ data: manualRows, error: manualError }, { data: sharedRows, error: sharedError }] = await Promise.all([
+        admin.from("blogger_kpi_month_bloggers").select("*").eq("month", month).order("updated_at", { ascending: false }),
+        admin.from("blogger_shared_state").select("namespace,record_key,value_json,updated_at").in("namespace", ["blogger_create", "blogger"]).order("updated_at"),
+      ]);
+      if (manualError || sharedError) return json(request, { error: manualError?.message || sharedError?.message }, 500);
+      const cardsByKey: Record<string, any> = {};
+      for (const row of sharedRows || []) {
+        const key = String(row.record_key || row.value_json?.id || "");
+        if (!key) continue;
+        cardsByKey[key] = { ...(cardsByKey[key] || {}), ...(row.value_json || {}) };
+      }
+      const result: Record<string, any> = {};
+      for (const [key, card] of Object.entries(cardsByKey)) {
+        if (String(card.createdAt || "").slice(0, 7) !== month) continue;
+        result[key] = {
+          month,
+          bloggerKey: key,
+          bloggerName: String(card.display || card.name || "Блогер"),
+          manager: String(card.manager || (card.createdByRole === "manager" ? card.createdByName || "" : "") || "Не назначен"),
+          assistant: card.createdByRole === "assistant" ? String(card.createdByName || "") : "",
+          factReach: Math.max(0, Number(card.reach || 0)),
+          note: "Добавлен автоматически по дате создания",
+          automatic: true,
+          updatedAt: card.updatedAt || null,
+        };
+      }
+      for (const row of manualRows || []) {
+        const key = String(row.blogger_key);
+        const previous = result[key] || {};
+        result[key] = {
+          ...previous,
+          month: row.month,
+          bloggerKey: key,
+          bloggerName: row.blogger_name,
+          manager: row.manager,
+          assistant: previous.assistant || "",
+          factReach: Number(row.fact_reach || 0),
+          note: row.note || previous.note || "",
+          automatic: Boolean(previous.automatic),
+          updatedAt: row.updated_at,
+        };
+      }
+      return json(request, { bloggers: Object.values(result) });
     }
     if (request.method === "POST") {
       const body = await request.json().catch(() => null);
@@ -562,7 +602,23 @@ Deno.serve(async (request: Request) => {
   }
 
   if (path === "/api/department-months") {
-    if (request.method === "GET") { let { data } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false }); if (!data?.length) { await admin.from("blogger_department_months").insert({ month_key: systemMonth(), status: "active", updated_by: userId }); ({ data } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false })); } return json(request, { periods: (data || []).map((row: any) => ({ month: row.month_key, status: row.status, createdAt: row.created_at, closedAt: row.closed_at || "", updatedBy: row.updated_by })) }); }
+    if (request.method === "GET") {
+      let { data, error } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false });
+      if (error) return json(request, { error: error.message }, 500);
+      const currentMonth = systemMonth();
+      const hasActiveMonth = (data || []).some((row: any) => row.status === "active");
+      const hasCurrentMonth = (data || []).some((row: any) => row.month_key === currentMonth);
+      if (!hasActiveMonth && !hasCurrentMonth) {
+        const { error: insertError } = await admin.from("blogger_department_months").upsert(
+          { month_key: currentMonth, status: "active", updated_by: userId },
+          { onConflict: "month_key", ignoreDuplicates: true },
+        );
+        if (insertError) return json(request, { error: insertError.message }, 500);
+        ({ data, error } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false }));
+        if (error) return json(request, { error: error.message }, 500);
+      }
+      return json(request, { periods: (data || []).map((row: any) => ({ month: row.month_key, status: row.status, createdAt: row.created_at, closedAt: row.closed_at || "", updatedBy: row.updated_by })) });
+    }
     if (request.method === "POST") { if (role !== "leader") return json(request, { error: "Управлять месяцами может только администратор" }, 403); const body = await request.json().catch(() => null); const month = String(body?.month || ""); if (!["close", "add"].includes(body?.action) || !/^\d{4}-\d{2}$/.test(month)) return json(request, { error: "Проверьте действие и месяц" }, 400); if (body.action === "close") { const { data, error } = await admin.from("blogger_department_months").update({ status: "archived", closed_at: new Date().toISOString(), updated_by: userId }).eq("month_key", month).eq("status", "active").select(); if (error || !data?.length) return json(request, { error: "Месяц уже закрыт" }, 409); } else { const { data: active } = await admin.from("blogger_department_months").select("month_key").eq("status", "active").limit(1); if (active?.length) return json(request, { error: "Сначала закройте текущий месяц" }, 409); const { error } = await admin.from("blogger_department_months").insert({ month_key: month, status: "active", updated_by: userId }); if (error) return json(request, { error: "Этот месяц уже существует" }, 409); } const { data } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false }); return json(request, { period: { month, status: body.action === "close" ? "archived" : "active" }, periods: (data || []).map((row: any) => ({ month: row.month_key, status: row.status, createdAt: row.created_at, closedAt: row.closed_at || "", updatedBy: row.updated_by })) }); }
   }
 
