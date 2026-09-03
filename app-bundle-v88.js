@@ -24,6 +24,12 @@
     placementGuaranteeInput.closest(".field").querySelector("label").textContent = "Плановый / гарантированный охват";
     placementGuaranteeInput.insertAdjacentHTML("afterend", '<small>Автоматически из карточки блогера. Фактический охват вносится после выхода отдельно.</small>');
   }
+  var evidenceBloggerSelect = document.getElementById("evidenceBlogger");
+  if (evidenceBloggerSelect && !document.getElementById("evidenceBloggerSearch")) {
+    evidenceBloggerSelect.required = false;
+    evidenceBloggerSelect.classList.add("hidden");
+    evidenceBloggerSelect.insertAdjacentHTML("beforebegin", '<input class="input" id="evidenceBloggerSearch" type="search" autocomplete="off" placeholder="Введите @ник, имя или ссылку" required><small id="evidenceBloggerSearchMeta">Начните вводить имя блогера</small>');
+  }
   var drawerFoot = document.getElementById("drawerFoot");
   if (drawerFoot && !document.getElementById("createPlacementFromBloggerBtn")) {
     document.getElementById("saveBloggerBtn").insertAdjacentHTML("beforebegin", '<button class="btn btn-outline create-placement-from-blogger-btn" id="createPlacementFromBloggerBtn" type="button">Создать размещение</button>');
@@ -4061,13 +4067,45 @@
       function releasePendingEvidenceImages() {
         pendingEvidenceImages.forEach(function (item) { if (item && /^blob:/.test(item.preview || "")) URL.revokeObjectURL(item.preview); });
       }
-      function populateEvidenceBloggers(selected) {
-        var names = bloggers.map(function (b) { return b.name; }).concat(["@fit_with_anna","@alexey_vlasov"]);
-        if (selected && names.indexOf(selected) < 0) names.unshift(selected);
-        names = names.filter(function (name, index) { return names.indexOf(name) === index; });
+      function evidenceBloggerCandidates(selected) {
+        var records = bloggers.map(function (blogger) {
+          return {
+            value:blogger.name || blogger.display,
+            search:[blogger.name,blogger.display,blogger.link,blogger.sourceKey].join(" ").toLowerCase()
+          };
+        });
+        ["@fit_with_anna","@alexey_vlasov"].forEach(function (name) { records.push({value:name,search:name.toLowerCase()}); });
+        if (selected && !records.some(function (item) { return item.value === selected; })) records.unshift({value:selected,search:String(selected).toLowerCase()});
+        return records.filter(function (item,index,array) { return item.value && array.findIndex(function (candidate) { return candidate.value === item.value; }) === index; });
+      }
+      function updateEvidenceBloggerSearch() {
+        var input = document.getElementById("evidenceBloggerSearch");
         var select = document.getElementById("evidenceBlogger");
-        select.innerHTML = names.map(function (name) { return '<option>' + name + '</option>'; }).join("");
-        if (selected) select.value = selected;
+        var meta = document.getElementById("evidenceBloggerSearchMeta");
+        var query = String(input.value || "").trim().toLowerCase();
+        var normalized = query.replace(/^@/,"");
+        if (!query) {
+          select.value = "";
+          meta.textContent = "Начните вводить имя блогера";
+          return null;
+        }
+        var candidates = evidenceBloggerCandidates("");
+        var matches = candidates.filter(function (item) {
+          var text = item.search;
+          return text.indexOf(query) >= 0 || (normalized && text.replace(/@/g,"").indexOf(normalized) >= 0);
+        });
+        var exact = matches.find(function (item) { return String(item.value).toLowerCase().replace(/^@/,"") === normalized; });
+        var selected = exact || (matches.length === 1 ? matches[0] : null);
+        select.value = selected ? selected.value : "";
+        meta.textContent = selected ? "Выбран: " + selected.value : matches.length ? "Найдено: " + matches.length + " · уточните запрос" : "Блогер не найден";
+        return selected;
+      }
+      function populateEvidenceBloggers(selected) {
+        var candidates = evidenceBloggerCandidates(selected);
+        var select = document.getElementById("evidenceBlogger");
+        select.innerHTML = '<option value=""></option>' + candidates.map(function (item) { return '<option value="' + safeText(item.value) + '">' + safeText(item.value) + '</option>'; }).join("");
+        document.getElementById("evidenceBloggerSearch").value = selected || "";
+        updateEvidenceBloggerSearch();
       }
       function openEvidenceForm(blogger) {
         if (role === "analyst") return showToast("У аналитика доступ только на просмотр");
@@ -5187,6 +5225,7 @@
       });
       document.getElementById("acceptanceChecklist").addEventListener("change",renderAcceptanceStatus);
       document.getElementById("addEvidenceBtn").addEventListener("click", function () { openEvidenceForm(""); });
+      document.getElementById("evidenceBloggerSearch").addEventListener("input",updateEvidenceBloggerSearch);
       document.querySelectorAll(".evidence-add-btn").forEach(function (button) {
         button.addEventListener("click", function () { openEvidenceForm(button.dataset.evidenceBlogger); });
       });
@@ -5208,11 +5247,14 @@
       });
       document.getElementById("evidenceForm").addEventListener("submit", function (event) {
         event.preventDefault();
+        updateEvidenceBloggerSearch();
+        var evidenceBlogger = document.getElementById("evidenceBlogger").value;
+        if (!evidenceBlogger) return showToast("Найдите и выберите одного блогера");
         if (!pendingEvidenceImages.length) return showToast("Прикрепите хотя бы одно фото статистики");
         var saveButton = document.getElementById("saveEvidenceBtn");
         var previousLabel = saveButton.textContent;
         var form = new FormData();
-        form.append("blogger",document.getElementById("evidenceBlogger").value);
+        form.append("blogger",evidenceBlogger);
         form.append("date",document.getElementById("evidenceDate").value);
         form.append("uploader",document.getElementById("evidenceEmployee").value);
         form.append("reach",document.getElementById("evidenceReach").value || "0");
