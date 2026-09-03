@@ -8,6 +8,27 @@
   var loginPasswordInput = document.getElementById("loginPassword");
   if (loginPasswordInput) loginPasswordInput.placeholder = "Не менее 8 символов";
 
+  var newBloggerReachInput = document.getElementById("newReach");
+  if (newBloggerReachInput) {
+    newBloggerReachInput.min = "0";
+    newBloggerReachInput.closest(".field").querySelector("label").textContent = "Плановый / гарантированный охват";
+    newBloggerReachInput.insertAdjacentHTML("afterend", '<small>Этот план автоматически переносится в новое размещение.</small>');
+  }
+  var editReachInput = document.getElementById("editReach");
+  if (editReachInput && !document.getElementById("editPlannedReach")) {
+    editReachInput.closest(".field").insertAdjacentHTML("beforebegin", '<div class="field"><label>Плановый / гарантированный охват</label><input class="input" id="editPlannedReach" type="number" min="0" step="1"><small>Переносится в размещение как план и не меняется при внесении факта.</small></div>');
+  }
+  var placementGuaranteeInput = document.getElementById("newPlacementGuarantee");
+  if (placementGuaranteeInput) {
+    placementGuaranteeInput.readOnly = true;
+    placementGuaranteeInput.closest(".field").querySelector("label").textContent = "Плановый / гарантированный охват";
+    placementGuaranteeInput.insertAdjacentHTML("afterend", '<small>Автоматически из карточки блогера. Фактический охват вносится после выхода отдельно.</small>');
+  }
+  var drawerFoot = document.getElementById("drawerFoot");
+  if (drawerFoot && !document.getElementById("createPlacementFromBloggerBtn")) {
+    document.getElementById("saveBloggerBtn").insertAdjacentHTML("beforebegin", '<button class="btn btn-outline create-placement-from-blogger-btn" id="createPlacementFromBloggerBtn" type="button">Создать размещение</button>');
+  }
+
   var saveActualField = document.getElementById("saveCardActualBtn").closest(".field");
   saveActualField.insertAdjacentHTML("beforebegin", '<div class="field"><label>Клики по размещению</label><input class="input" id="cardActualClicks" type="number" min="0" max="1000000000" step="1" placeholder="Введите количество кликов"><small>Сохраняются вместе с охватом и попадают в общую статистику.</small></div>');
 
@@ -3803,20 +3824,30 @@
         if (meta) meta.textContent = query ? "Найдено: " + matches.length + (matches.length === 1 ? " · карточка выбрана автоматически" : "") : "Можно искать по @нику, имени или ссылке";
         updatePlacementBloggerPreview();
       }
+      function bloggerPlacementGuarantee(blogger) {
+        var planned = Number(blogger && blogger.plannedReach);
+        if (blogger && blogger.plannedReach != null && blogger.plannedReach !== "") return Number.isFinite(planned) && planned >= 0 ? Math.round(planned) : 0;
+        var legacyReach = Number(blogger && blogger.reach);
+        return Number.isFinite(legacyReach) && legacyReach >= 0 ? Math.round(legacyReach) : 0;
+      }
       function updatePlacementBloggerPreview() {
         var id = document.getElementById("newPlacementBlogger").value;
         var blogger = bloggers.find(function (item) { return String(item.id) === String(id); });
         var button = document.getElementById("openSelectedBloggerBtn");
+        var guaranteeInput = document.getElementById("newPlacementGuarantee");
         button.disabled = !blogger;
         if (!blogger) {
           document.getElementById("newPlacementBloggerName").textContent = "Блогер не выбран";
           document.getElementById("newPlacementBloggerMeta").textContent = "Выберите карточку из общей базы выше";
+          guaranteeInput.value = "0";
           return;
         }
+        var guarantee = bloggerPlacementGuarantee(blogger);
         document.getElementById("newPlacementBloggerName").textContent = blogger.display + " · " + blogger.name;
-        document.getElementById("newPlacementBloggerMeta").textContent = blogger.brand + " · " + blogger.manager + " · " + blogger.category;
+        document.getElementById("newPlacementBloggerMeta").textContent = blogger.brand + " · " + blogger.manager + " · " + blogger.category + " · план охвата " + number(guarantee);
         document.getElementById("newPlacementManager").value = activeEmployeeManagers().indexOf(blogger.manager) >= 0 ? blogger.manager : (activeEmployeeManagers()[0] || "");
         document.getElementById("newPlacementDirection").value = blogger.brand;
+        guaranteeInput.value = String(guarantee);
       }
       function bloggerExitIsoDate(blogger) {
         var sortDate = String((blogger && blogger.sortDate) || "");
@@ -4169,6 +4200,7 @@
         document.getElementById("editBarterContract").value = b.barterContract;
         document.getElementById("editCooperationType").value = b.cooperationType || "Бартер";
         document.getElementById("editSpent").value = bloggerTotalSpend(b);
+        document.getElementById("editPlannedReach").value = bloggerPlacementGuarantee(b);
         document.getElementById("editReach").value = b.reach;
         document.getElementById("editComment").value = b.comment || "";
         var trackedSpend = bloggerTrackedSpend(b);
@@ -4395,7 +4427,7 @@
         }
         syncBloggerEditControls();
         var canEdit = role !== "analyst";
-        document.querySelectorAll(".add-blogger-btn,#quickAddBtn,#addPlacementBtn,#calendarAddBtn,#fillReportBtn,#fillAssistantReportBtn,#addEvidenceBtn,.evidence-add-btn").forEach(function (el) { el.classList.toggle("hidden", !canEdit); });
+        document.querySelectorAll(".add-blogger-btn,#quickAddBtn,#addPlacementBtn,#calendarAddBtn,#createPlacementFromBloggerBtn,#fillReportBtn,#fillAssistantReportBtn,#addEvidenceBtn,.evidence-add-btn").forEach(function (el) { el.classList.toggle("hidden", !canEdit); });
         if (role === "manager") {
           document.getElementById("managerMetricsFilter").value = activeEmployeeManagers()[0] || "all";
           renderManagerMetrics();
@@ -4575,7 +4607,7 @@
           commercialContract:document.getElementById("newCommercialContract").value,
           barterContract:document.getElementById("newBarterContract").value,
           cooperationType:document.getElementById("newCommercialContract").value !== "Нет" && document.getElementById("newBarterContract").value !== "Нет" ? "Смешанный" : document.getElementById("newCommercialContract").value !== "Нет" ? "Коммерция" : "Бартер",
-          spent:0, contractFiles:[], reach:Number(document.getElementById("newReach").value || 0), leads:0, sales:0, revenue:0, last:"—", comment:document.getElementById("newComment").value.trim()
+          spent:0, contractFiles:[], plannedReach:Number(document.getElementById("newReach").value || 0), reach:0, leads:0, sales:0, revenue:0, last:"—", comment:document.getElementById("newComment").value.trim()
         };
         var submitButton = form.querySelector('button[type="submit"]');
         if (submitButton) submitButton.disabled = true;
@@ -4611,6 +4643,7 @@
         b.barterContract = document.getElementById("editBarterContract").value;
         b.cooperationType = document.getElementById("editCooperationType").value;
         b.spent = Math.max(0,Number(document.getElementById("editSpent").value || 0));
+        b.plannedReach = Math.max(0,Math.round(Number(document.getElementById("editPlannedReach").value || 0)));
         b.comment = document.getElementById("editComment").value.trim();
         var finishCardSave = function () { saveData(); queueSharedStateRecords([sharedBloggerRecord(b)]); refreshAllDerivedViews(); closeLayers(); showToast("Изменения сохранены · все вкладки и статистика обновлены"); };
         if (cardActualDirty) saveCurrentCardActuals().then(finishCardSave).catch(function () {});
@@ -5207,11 +5240,15 @@
         var button = event.target.closest("[data-view-evidence]");
         if (button) openEvidenceViewer(button.dataset.viewEvidence);
       });
-      function openPlacementCreator(origin) {
+      function openPlacementCreator(origin,bloggerId) {
         if (role === "analyst") return showToast("У аналитика доступ только на просмотр");
         placementCreateOrigin = origin === "calendar" ? "calendar" : "placements";
         document.getElementById("newPlacementBloggerSearch").value = "";
         populatePlacementBloggerSelect();
+        if (bloggerId != null && bloggerId !== "") {
+          document.getElementById("newPlacementBlogger").value = String(bloggerId);
+          updatePlacementBloggerPreview();
+        }
         var today = localTodayIso();
         document.getElementById("newPlacementDate").value = today;
         document.getElementById("newPlacementWarmupStart").value = today;
@@ -5227,6 +5264,10 @@
       }
       document.getElementById("addPlacementBtn").addEventListener("click", function () {
         openPlacementCreator("placements");
+      });
+      document.getElementById("createPlacementFromBloggerBtn").addEventListener("click", function () {
+        if (!currentBloggerId) return showToast("Сначала откройте карточку блогера");
+        openPlacementCreator("placements",currentBloggerId);
       });
       document.getElementById("newPlacementBlogger").addEventListener("change",updatePlacementBloggerPreview);
       document.getElementById("newPlacementBloggerSearch").addEventListener("input",populatePlacementBloggerSelect);
@@ -5252,7 +5293,7 @@
           dealType:document.getElementById("newPlacementDealType").value,brief:document.getElementById("newPlacementBrief").value,
           fullName:blogger.display,contract:document.getElementById("newPlacementContract").value,chat:false,
           platform:blogger.link || (blogger.platforms || []).join(", "),type:document.getElementById("newPlacementFormat").value,duration:"—",
-          cost:Number(document.getElementById("newPlacementCost").value || 0),guaranteed:Number(document.getElementById("newPlacementGuarantee").value || 0),
+          cost:Number(document.getElementById("newPlacementCost").value || 0),guaranteed:bloggerPlacementGuarantee(blogger),
           actual:null,clicks:null,leads:0,sales:0,revenue:0,comment:document.getElementById("newPlacementComment").value.trim() || "Новое размещение",
           source:"Ручное добавление"
         };
