@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v113-actual-reach-blogger-search";
+const CACHE_NAME = "nsl-bloggers-github-v114-traffic-guard";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
@@ -9,6 +9,7 @@ const APP_SHELL = [
   `${APP_ROOT}security-bootstrap-v88.js`,
   `${APP_ROOT}body-bundle-v88.js`,
   `${APP_ROOT}vendor-bundle-v88.js`,
+  `${APP_ROOT}traffic-guard-v114.js`,
   `${APP_ROOT}app-bundle-v88.js`,
 ];
 
