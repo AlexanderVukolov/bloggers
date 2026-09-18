@@ -97,6 +97,28 @@ test("actual reach form searches bloggers instead of exposing the long select",(
   assert.match(source,/if \(!evidenceBlogger\) return showToast\("Найдите и выберите одного блогера"\)/);
 });
 
+test("weekly placement report groups by Monday and keeps missing actual reach blank",() => {
+  const context = {
+    Number,Object,String,Date,Math,
+    placementIsoDate:item => item.sortDate,
+    effectivePlacementActual:item => item.actual == null ? null : item.actual,
+  };
+  vm.createContext(context);
+  vm.runInContext(extractFunction("placementWeekBounds"),context);
+  const groups = runFunction("placementWeeklyGroups",context)([
+    {sortDate:"2026-09-13",guaranteed:100,actual:90},
+    {sortDate:"2026-09-14",guaranteed:200,actual:null},
+    {sortDate:"2026-09-20",guaranteed:300,actual:310},
+    {sortDate:"2026-09-21",guaranteed:400,actual:0},
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(groups)),[
+    {start:"2026-09-21",end:"2026-09-27",count:1,guaranteed:400,actual:0,reported:1},
+    {start:"2026-09-14",end:"2026-09-20",count:2,guaranteed:500,actual:310,reported:1},
+    {start:"2026-09-07",end:"2026-09-13",count:1,guaranteed:100,actual:90,reported:1},
+  ]);
+  assert.match(source,/"placementWeekDate"\]\.some/);
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},

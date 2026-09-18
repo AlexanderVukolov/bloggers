@@ -3476,7 +3476,59 @@
           if (sort === "revenue-desc") return Number(b.revenue || 0)-Number(a.revenue || 0);
           return String(b.sortDate || "").localeCompare(String(a.sortDate || ""));
         });
+        var selectedWeek = document.getElementById("placementWeekDate");
+        if (selectedWeek && selectedWeek.value) {
+          var bounds = placementWeekBounds(selectedWeek.value);
+          rows = rows.filter(function (item) { var date = placementIsoDate(item); return date >= bounds.start && date <= bounds.end; });
+        }
         return rows;
+      }
+      function placementWeekBounds(value) {
+        var date = new Date(String(value) + "T12:00:00Z");
+        if (!Number.isFinite(date.getTime())) return {start:"",end:""};
+        date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+        var start = date.toISOString().slice(0,10);
+        date.setUTCDate(date.getUTCDate() + 6);
+        return {start:start,end:date.toISOString().slice(0,10)};
+      }
+      function placementWeeklyGroups(rows) {
+        var groups = {};
+        rows.forEach(function (item) {
+          var date = placementIsoDate(item);
+          if (!date) return;
+          var bounds = placementWeekBounds(date);
+          var group = groups[bounds.start] || (groups[bounds.start] = {start:bounds.start,end:bounds.end,count:0,guaranteed:0,actual:0,reported:0});
+          group.count += 1;
+          group.guaranteed += Number(item.guaranteed || 0);
+          var actual = effectivePlacementActual(item);
+          if (actual != null) { group.actual += actual; group.reported += 1; }
+        });
+        return Object.keys(groups).sort().reverse().map(function (key) { return groups[key]; });
+      }
+      function renderPlacementWeeks() {
+        var selected = document.getElementById("placementWeekDate").value;
+        var rows = filteredPlacementRecords();
+        var groups = placementWeeklyGroups(rows);
+        document.getElementById("placementWeekLabel").textContent = selected ? "Выбрана неделя: " + displayIsoDate(placementWeekBounds(selected).start) + "–" + displayIsoDate(placementWeekBounds(selected).end) : "Все недели по текущим фильтрам";
+        document.getElementById("placementWeekTable").innerHTML = groups.map(function (group) {
+          return '<tr><td>' + displayIsoDate(group.start) + '–' + displayIsoDate(group.end) + '</td><td>' + number(group.count) + '</td><td>' + number(group.guaranteed) + '</td><td>' + (group.reported ? number(group.actual) : '—') + '</td><td>' + number(group.reported) + ' из ' + number(group.count) + '</td></tr>';
+        }).join("") || '<tr><td colspan="5">Размещений за выбранный период нет</td></tr>';
+      }
+      function exportPlacementWorkbook() {
+        var rows = filteredPlacementRecords();
+        var weeks = placementWeeklyGroups(rows);
+        var detail = [["Неделя с","Неделя по","Дата выхода","Блогер","Направление","Менеджер","Формат","Сотрудничество","Гарант охвата","Факт охвата","Статус","Решение"]];
+        rows.forEach(function (item) {
+          var date = placementIsoDate(item);
+          var week = date ? placementWeekBounds(date) : {start:"",end:""};
+          var actual = effectivePlacementActual(item);
+          detail.push([week.start,week.end,date,item.tag || "",placementDirection(item),item.manager || "",item.type || "",item.dealType || "",Number(item.guaranteed || 0),actual == null ? "" : actual,placementStatus(item),item.decision || ""]);
+        });
+        var weekly = [["Неделя с","Неделя по","Размещений","Гарант охвата","Факт охвата","Факт внесён"]];
+        weeks.forEach(function (item) { weekly.push([item.start,item.end,item.count,item.guaranteed,item.reported ? item.actual : "",item.reported + " из " + item.count]); });
+        var selected = document.getElementById("placementWeekDate").value;
+        downloadPlacementXlsx([["Размещения",detail],["Недели",weekly]],"NSL-размещения-" + (selected ? placementWeekBounds(selected).start : document.getElementById("placementMonthFilter").value || "все") + ".xlsx");
+        showToast("Excel: " + number(rows.length) + " размещений, " + number(weeks.length) + " недель");
       }
       function filteredReelRecords() {
         var query = document.getElementById("placementSearch").value.toLowerCase().trim();
@@ -3529,7 +3581,7 @@
       }
       function placementSummaryHasNarrowFilters() {
         if (placementQuickFilter !== "all") return true;
-        return ["placementSearch","placementManagerFilter","placementDecisionFilter","placementDealTypeFilter","placementStatusFilter","placementFormatFilter","placementReachMin","placementReachMax","placementDateFrom","placementDateTo","placementContractFilter"].some(function (id) {
+        return ["placementSearch","placementManagerFilter","placementDecisionFilter","placementDealTypeFilter","placementStatusFilter","placementFormatFilter","placementReachMin","placementReachMax","placementDateFrom","placementDateTo","placementContractFilter","placementWeekDate"].some(function (id) {
           var element = document.getElementById(id);
           return Boolean(element && String(element.value || "").trim());
         });
@@ -3594,7 +3646,8 @@
           document.getElementById("placementReachMax").value,
           document.getElementById("placementDateFrom").value,
           document.getElementById("placementDateTo").value,
-          document.getElementById("placementContractFilter").value
+          document.getElementById("placementContractFilter").value,
+          document.getElementById("placementWeekDate").value
         ];
         if (detailedFilterValues.some(function (value) { return String(value || "").trim() !== ""; })) return null;
         if (direction) {
@@ -3608,6 +3661,7 @@
       }
       function renderPlacementRecords() {
         var rows = filteredPlacementRecords();
+        renderPlacementWeeks();
         document.getElementById("placementFilterCount").textContent = "Найдено: " + number(rows.length) + " из " + number(synchronizedPlacementRecords().length) + (document.getElementById("placementMonthFilter").value ? " · выбран " + activeMonthLabel(document.getElementById("placementMonthFilter").value) : " · вся база");
         var pages = Math.max(1,Math.ceil(rows.length / PAGE_SIZE));
         placementPage = Math.min(placementPage,pages);
@@ -4994,8 +5048,12 @@
         showToast("План на месяц сохранён");
       });
       document.getElementById("managerExportBtn").addEventListener("click", function () { showToast("Данные выбранного раздела подготовлены к выгрузке"); });
+      document.getElementById("placementExportBtn").addEventListener("click",exportPlacementWorkbook);
+      document.getElementById("placementWeekDate").addEventListener("change",function () { placementPage = 1; renderPlacementRecords(); });
+      document.getElementById("placementWeekClear").addEventListener("click",function () { document.getElementById("placementWeekDate").value = ""; placementPage = 1; renderPlacementRecords(); });
       ["placementSearch","placementMonthFilter","placementManagerFilter","placementDecisionFilter","placementDirectionFilter","placementDealTypeFilter","placementStatusFilter","placementFormatFilter","placementReachMin","placementReachMax","placementDateFrom","placementDateTo","placementContractFilter","placementSortFilter"].forEach(function (id) { document.getElementById(id).addEventListener("input",function () { placementPage = 1; expandedPlacementId = null; renderPlacementRecords(); }); });
       document.getElementById("resetPlacementFilters").addEventListener("click",function () {
+        document.getElementById("placementWeekDate").value = "";
         ["placementSearch","placementManagerFilter","placementDecisionFilter","placementDirectionFilter","placementDealTypeFilter","placementStatusFilter","placementFormatFilter","placementReachMin","placementReachMax","placementDateFrom","placementDateTo","placementContractFilter"].forEach(function (id) { document.getElementById(id).value = ""; });
         document.getElementById("placementMonthFilter").value = activeMonthKey();
         document.getElementById("placementSortFilter").value = "created-desc";
@@ -5497,6 +5555,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=111",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=115",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

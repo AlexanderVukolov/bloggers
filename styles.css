@@ -746,3 +746,10 @@
       .login-copy h1 { font-size: 34px; }
       .login-form-wrap { padding: 28px 20px calc(28px + env(safe-area-inset-bottom)); align-items: start; }
     }
+/* Weekly placement report keeps its controls usable on phones. */
+.placement-week-report { margin-bottom: 16px; }
+.placement-week-report .card-title { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.placement-week-report .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.placement-week-report .actions label { font-size: 12px; color: var(--muted); }
+.placement-week-report .actions input { width: auto; min-width: 165px; }
+.placement-week-report table { min-width: 600px; }
