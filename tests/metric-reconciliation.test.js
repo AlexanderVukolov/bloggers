@@ -119,6 +119,16 @@ test("weekly placement report groups by Monday and keeps missing actual reach bl
   assert.match(source,/"placementWeekDate"\]\.some/);
 });
 
+test("reports and control export the active table to a real workbook",() => {
+  assert.match(source,/function exportReportsWorkbook\(\)/);
+  assert.match(source,/\["Менеджеры",reportExportTable\("managerMetricsTable"\)\]/);
+  assert.match(source,/\["Ассистенты",reportExportTable\("assistantDailyTable"\)\]/);
+  assert.match(source,/\["План-факт",reportExportTable\("managerMonthlyPlanTable"\)\]/);
+  assert.match(source,/\["Сводка месяца",reportExportTable\("monthlyControlTable"\)\]/);
+  assert.match(source,/\["Фактические охваты",reportExportTable\("evidenceTable"\)\]/);
+  assert.match(source,/managerExportBtn"\)\.addEventListener\("click",exportReportsWorkbook\)/);
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},

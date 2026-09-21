@@ -4452,6 +4452,49 @@
         document.querySelectorAll(".report-view").forEach(function (item) { item.classList.toggle("hidden",item !== target); });
         if (view === "summary") renderMonthlyControlSummary();
       }
+      function reportExportCellValue(cell) {
+        var controls = Array.from(cell.querySelectorAll("input,select"));
+        if (controls.length) return controls.map(function (control) {
+          if (control.tagName === "SELECT") return control.options[control.selectedIndex] ? control.options[control.selectedIndex].text : control.value;
+          return control.value;
+        }).join(" / ");
+        return String(cell.innerText || cell.textContent || "").replace(/\s+/g," ").trim();
+      }
+      function reportExportTable(tableId) {
+        var table = document.getElementById(tableId);
+        if (!table) return [];
+        var root = table.closest("table");
+        if (!root) return [];
+        return Array.from(root.querySelectorAll("tr")).map(function (row) {
+          return Array.from(row.querySelectorAll("th,td")).map(reportExportCellValue);
+        }).filter(function (row) { return row.some(function (value) { return String(value || "").trim(); }); });
+      }
+      function activeReportView() {
+        var active = document.querySelector("#reportViewSwitch .segment.active");
+        return active && active.dataset.reportView || "daily";
+      }
+      function exportReportsWorkbook() {
+        var view = activeReportView();
+        var sheets = [];
+        var period = localTodayIso();
+        if (view === "daily") {
+          period = document.getElementById("managerDailyDateFilter").value || period;
+          sheets = [["Менеджеры",reportExportTable("managerMetricsTable")],["Ассистенты",reportExportTable("assistantDailyTable")]];
+        } else if (view === "monthly") {
+          period = document.getElementById("managerMonthlyPlanFilter").value || activeMonthKey();
+          sheets = [["План-факт",reportExportTable("managerMonthlyPlanTable")]];
+        } else if (view === "summary") {
+          period = document.getElementById("monthlyControlMonth").value || activeMonthKey();
+          sheets = [["Сводка месяца",reportExportTable("monthlyControlTable")]];
+        } else {
+          period = activeMonthKey();
+          sheets = [["Фактические охваты",reportExportTable("evidenceTable")]];
+        }
+        sheets = sheets.filter(function (sheet) { return sheet[1].length > 1; });
+        if (!sheets.length) return showToast("В выбранном разделе пока нет строк для выгрузки");
+        downloadPlacementXlsx(sheets,"NSL-отчёты-и-контроль-" + view + "-" + period + ".xlsx");
+        showToast("Excel сформирован · " + sheets.map(function (sheet) { return sheet[0]; }).join(", "));
+      }
       function renderBloggerHistory(blogger) {
         var rows = placementRowsForBlogger(blogger);
         document.getElementById("drawerPlacementHistory").innerHTML = rows.length ? rows.map(function (item) {
@@ -5047,7 +5090,7 @@
         renderMonthlyPlanFact();
         showToast("План на месяц сохранён");
       });
-      document.getElementById("managerExportBtn").addEventListener("click", function () { showToast("Данные выбранного раздела подготовлены к выгрузке"); });
+      document.getElementById("managerExportBtn").addEventListener("click",exportReportsWorkbook);
       document.getElementById("placementExportBtn").addEventListener("click",exportPlacementWorkbook);
       document.getElementById("placementWeekDate").addEventListener("change",function () { placementPage = 1; renderPlacementRecords(); });
       document.getElementById("placementWeekClear").addEventListener("click",function () { document.getElementById("placementWeekDate").value = ""; placementPage = 1; renderPlacementRecords(); });
@@ -5555,6 +5598,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=115",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=116",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
