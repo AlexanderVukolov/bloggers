@@ -162,9 +162,10 @@
       var currentEmployeeProfile = null;
       var employeeProfileTargetId = "";
       var registrationInviteMatch = String(window.location.hash || "").match(/(?:^#|&)invite=([a-f0-9]{64})(?:&|$)/i);
-      var registrationInviteToken = registrationInviteMatch ? registrationInviteMatch[1].toLowerCase() : "";
+      var registrationInviteToken = registrationInviteMatch ? registrationInviteMatch[1].toLowerCase() : (sessionStorage.getItem("nslRegistrationInviteToken") || "");
       var adminAccessMatch = String(window.location.hash || "").match(/(?:^#|&)access=([a-f0-9]{64})(?:&|$)/i);
       var adminLinkOpened = Boolean(adminAccessMatch);
+      if (registrationInviteMatch) sessionStorage.setItem("nslRegistrationInviteToken",registrationInviteToken);
       if (adminAccessMatch) localStorage.setItem("nslAdminAccess",adminAccessMatch[1].toLowerCase());
       if (adminAccessMatch || registrationInviteMatch) history.replaceState(null,"",window.location.pathname + window.location.search);
       var adminAccessToken = localStorage.getItem("nslAdminAccess") || "";
@@ -4627,8 +4628,8 @@
         button.disabled = true; button.textContent = mode === "register" ? "Создаю кабинет…" : "Вхожу…";
         if (mode === "register") {
           var confirmation = document.getElementById("loginPasswordConfirm").value;
-          if (password.length < 8 || password !== confirmation) {
-            message.innerHTML = "<b>Проверьте пароль.</b> Минимум 8 символов, оба поля должны совпадать.";
+          if (password.length < 12 || password !== confirmation) {
+            message.innerHTML = "<b>Проверьте пароль.</b> Минимум 12 символов, оба поля должны совпадать.";
             button.disabled = false; button.textContent = "Зарегистрироваться"; return;
           }
           message.innerHTML = "Активирую персональный кабинет и связываю историю…";
@@ -4637,6 +4638,7 @@
             return response.json();
           }).then(function (data) {
             registrationInviteToken = "";
+            sessionStorage.removeItem("nslRegistrationInviteToken");
             return supabaseClient.auth.signInWithPassword({email:data.email,password:password}).then(function (result) { if (result.error) throw result.error; return activateSession(result.data.session); });
           }).catch(function (error) {
             message.innerHTML = "<b>Регистрация не завершена.</b> " + safeText(error.message || "Попросите администратора создать новую ссылку");
@@ -4646,11 +4648,20 @@
         var email = document.getElementById("loginEmail").value.trim().toLowerCase();
         message.innerHTML = "Проверяю рабочий аккаунт…";
         supabaseClient.auth.signInWithPassword({email:email,password:password}).then(function (result) {
-          if (result.error) throw result.error;
-          return activateSession(result.data.session);
+          if (result.error) {
+            currentSession = null;
+            message.innerHTML = "<b>Неверная почта или пароль.</b> Если пароль создавался по приглашению, снова откройте персональную ссылку и задайте пароль не короче 12 символов.";
+            return null;
+          }
+          return activateSession(result.data.session).catch(function (error) {
+            currentSession = null;
+            return supabaseClient.auth.signOut().catch(function () {}).then(function () {
+              message.innerHTML = "<b>Пароль принят, но кабинет не открылся.</b> " + safeText(error && error.message ? error.message : "Аккаунт не связан с карточкой сотрудника. Обратитесь к администратору.");
+            });
+          });
         }).catch(function (error) {
           currentSession = null;
-          message.innerHTML = "<b>Не удалось войти.</b> Проверьте почту и пароль или попросите администратора сформировать новую ссылку доступа.";
+          message.innerHTML = "<b>Не удалось проверить аккаунт.</b> " + safeText(error && error.message ? error.message : "Проверьте подключение и повторите вход.");
         }).finally(function () { button.disabled = false; button.textContent = "Войти"; });
       });
       document.getElementById("logoutBtn").addEventListener("click", function () {
@@ -5579,8 +5590,13 @@
         document.getElementById("loginEmailField").classList.add("hidden");
         document.getElementById("loginPasswordLabel").textContent = "Придумайте пароль";
         document.getElementById("loginPassword").setAttribute("autocomplete","new-password");
+        document.getElementById("loginPassword").minLength = 12;
+        document.getElementById("loginPassword").setAttribute("minlength","12");
+        document.getElementById("loginPassword").placeholder = "Не менее 12 символов";
         document.getElementById("loginPasswordConfirmField").classList.remove("hidden");
         document.getElementById("loginPasswordConfirm").required = true;
+        document.getElementById("loginPasswordConfirm").minLength = 12;
+        document.getElementById("loginPasswordConfirm").setAttribute("minlength","12");
         document.getElementById("loginSubmitBtn").textContent = "Зарегистрироваться";
         document.getElementById("loginMessage").innerHTML = "<b>Персональное приглашение найдено.</b> После регистрации вы сразу попадёте в свой кабинет.";
       }
@@ -5598,6 +5614,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=116",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=117",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

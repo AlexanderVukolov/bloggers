@@ -6,11 +6,14 @@ const vm = require("node:vm");
 const source = fs.readFileSync(require("node:path").join(__dirname,"..","app-bundle-v88.js"),"utf8");
 const apiSource = fs.readFileSync(require("node:path").join(__dirname,"..","supabase","functions","bloggers-api","index.ts"),"utf8");
 
-test("login remains compatible with existing eight-character passwords",() => {
+test("existing passwords remain compatible while new invitations require twelve characters",() => {
   assert.match(source,/passwordInput\.minLength = 8/);
-  assert.match(source,/password\.length < 8/);
-  assert.doesNotMatch(source,/password\.length < 12/);
-  assert.match(source,/Минимум 8 символов/);
+  assert.match(source,/password\.length < 12/);
+  assert.match(source,/Минимум 12 символов/);
+  assert.match(source,/nslRegistrationInviteToken/);
+  assert.match(source,/sessionStorage\.removeItem\("nslRegistrationInviteToken"\)/);
+  assert.match(source,/Неверная почта или пароль/);
+  assert.match(source,/Пароль принят, но кабинет не открылся/);
 });
 
 test("admin summary is protected and supports automatic months plus manual overrides",() => {
