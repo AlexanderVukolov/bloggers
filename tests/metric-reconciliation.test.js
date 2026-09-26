@@ -132,6 +132,16 @@ test("reports and control export the active table to a real workbook",() => {
   assert.match(source,/managerExportBtn"\)\.addEventListener\("click",exportReportsWorkbook\)/);
 });
 
+test("blogger export downloads the currently filtered rows as Excel",() => {
+  const bodySource = fs.readFileSync(require("node:path").join(__dirname,"..","body-bundle-v88.js"),"utf8");
+  assert.match(bodySource,/id=\\"bloggerExportBtn\\" type=\\"button\\">⇩ Экспорт в Excel/);
+  assert.match(source,/function exportBloggerWorkbook\(\)/);
+  assert.match(source,/var rows = filteredBloggerRows\.slice\(\)/);
+  assert.match(source,/\[\["Блогеры",detail\]\]/);
+  assert.match(source,/"NSL-блогеры-" \+ period \+ "\.xlsx"/);
+  assert.match(source,/bloggerExportBtn"\)\.addEventListener\("click",exportBloggerWorkbook\)/);
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},

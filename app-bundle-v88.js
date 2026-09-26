@@ -227,6 +227,7 @@
       bloggers = consolidateBloggerCards(bloggers);
       var bloggerEditMode = false;
       var bloggerEditSnapshot = null;
+      var filteredBloggerRows = [];
       var currentBloggerId = null;
       var currentBrand = "ln";
       var role = "manager";
@@ -3531,6 +3532,35 @@
         downloadPlacementXlsx([["Размещения",detail],["Недели",weekly]],"NSL-размещения-" + (selected ? placementWeekBounds(selected).start : document.getElementById("placementMonthFilter").value || "все") + ".xlsx");
         showToast("Excel: " + number(rows.length) + " размещений, " + number(weeks.length) + " недель");
       }
+      function exportBloggerWorkbook() {
+        var rows = filteredBloggerRows.slice();
+        if (!rows.length) return showToast("По выбранным фильтрам блогеров нет");
+        var detail = [["Блогер","Имя","Ссылка","Направление","Площадки","Категория","Статус","Менеджер","Тип сотрудничества","Договор — коммерция","Договор — бартер","Охват","Лиды","Продажи","Выручка, ₽","Последний выход","Дата добавления"]];
+        rows.forEach(function (blogger) {
+          detail.push([
+            blogger.name || "",
+            blogger.display || "",
+            blogger.link || "",
+            blogger.brand || "",
+            bloggerPlatformLabel(blogger),
+            blogger.category || "",
+            blogger.status || "",
+            blogger.manager || "",
+            blogger.cooperationType || "",
+            blogger.commercialContract || "",
+            blogger.barterContract || "",
+            Number(blogger.reach || 0),
+            Number(blogger.leads || 0),
+            Number(blogger.sales || 0),
+            Number(blogger.revenue || 0),
+            bloggerLastIso(blogger.last) || blogger.last || "",
+            String(blogger.createdAt || "").slice(0,10)
+          ]);
+        });
+        var period = document.getElementById("bloggerMonthFilter").value || "вся-база";
+        downloadPlacementXlsx([["Блогеры",detail]],"NSL-блогеры-" + period + ".xlsx");
+        showToast("Excel сформирован · " + number(rows.length) + " блогеров");
+      }
       function filteredReelRecords() {
         var query = document.getElementById("placementSearch").value.toLowerCase().trim();
         var month = document.getElementById("placementMonthFilter").value;
@@ -3786,6 +3816,7 @@
           if (sort === "last-desc") return bloggerLastIso(b.last).localeCompare(bloggerLastIso(a.last));
           return String(a.display || a.name).localeCompare(String(b.display || b.name),"ru");
         });
+        filteredBloggerRows = filtered.slice();
         var body = document.getElementById("bloggersTable");
         body.closest("table").classList.toggle("table-editing",bloggerEditMode);
         body.innerHTML = filtered.map(function (b) {
@@ -5105,6 +5136,7 @@
         showToast("План на месяц сохранён");
       });
       document.getElementById("managerExportBtn").addEventListener("click",exportReportsWorkbook);
+      document.getElementById("bloggerExportBtn").addEventListener("click",exportBloggerWorkbook);
       document.getElementById("placementExportBtn").addEventListener("click",exportPlacementWorkbook);
       document.getElementById("placementWeekDate").addEventListener("change",function () { placementPage = 1; renderPlacementRecords(); });
       document.getElementById("placementWeekClear").addEventListener("click",function () { document.getElementById("placementWeekDate").value = ""; placementPage = 1; renderPlacementRecords(); });
