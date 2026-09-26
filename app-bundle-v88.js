@@ -4109,7 +4109,9 @@
           var proof = images
             ? '<div class="proof-stack">' + images + '<button class="proof-more" data-view-evidence="' + report.id + '">Открыть (' + report.images.length + ')</button></div>'
             : '<span class="badge badge-red">Нет файлов</span>';
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(report.blogger) + '</div><div><strong>' + report.blogger + '</strong><small>Отчёт по выходу</small></div></div></td><td>' + report.date.split("-").reverse().join(".") + '</td><td><b>' + new Intl.NumberFormat("ru-RU").format(report.reach) + '</b></td><td>' + new Intl.NumberFormat("ru-RU").format(report.clicks || 0) + '</td><td>' + proof + '</td><td>' + report.uploader + '</td><td><span class="badge badge-green">' + report.status + '</span></td></tr>';
+          var statusClass = report.status === "Подтверждено" ? "badge-green" : report.status === "Требует уточнения" ? "badge-red" : "badge-amber";
+          var review = role === "leader" ? '<div class="table-actions"><button class="btn btn-sm btn-outline" type="button" data-confirm-evidence="' + report.id + '">Проверить</button><button class="btn btn-sm btn-outline" type="button" data-return-evidence="' + report.id + '">Уточнить</button></div>' : '';
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(report.blogger) + '</div><div><strong>' + report.blogger + '</strong><small>Отчёт по выходу</small></div></div></td><td>' + report.date.split("-").reverse().join(".") + '</td><td><b>' + new Intl.NumberFormat("ru-RU").format(report.reach) + '</b></td><td>' + new Intl.NumberFormat("ru-RU").format(report.clicks || 0) + '</td><td>' + proof + '</td><td>' + report.uploader + '</td><td><span class="badge ' + statusClass + '">' + report.status + '</span>' + review + '</td></tr>';
         }).join("") || '<tr><td colspan="7"><div class="empty-state">У выбранного сотрудника пока нет отчётов по охватам.</div></td></tr>';
         document.getElementById("evidenceCountBadge").textContent = visibleReports.length + " из " + evidenceReports.length + " отчётов";
       }
@@ -4227,6 +4229,7 @@
       function applyEvidenceFactsToBloggers() {
         var latestByIdentity = {};
         evidenceReports.forEach(function (report) {
+          if (report.status && report.status !== "Подтверждено") return;
           var identity = normalizeBloggerIdentity(report.blogger);
           if (!identity || !/^\d{4}-\d{2}-\d{2}$/.test(String(report.date || ""))) return;
           if (!latestByIdentity[identity] || String(report.date) > String(latestByIdentity[identity].date)) latestByIdentity[identity] = report;
@@ -5393,6 +5396,29 @@
       document.getElementById("evidenceTable").addEventListener("click", function (event) {
         var button = event.target.closest("[data-view-evidence]");
         if (button) openEvidenceViewer(button.dataset.viewEvidence);
+        var confirmButton = event.target.closest("[data-confirm-evidence]");
+        var returnButton = event.target.closest("[data-return-evidence]");
+        if (!confirmButton && !returnButton) return;
+        var id = (confirmButton || returnButton).dataset.confirmEvidence || (confirmButton || returnButton).dataset.returnEvidence;
+        var report = evidenceReports.find(function (item) { return String(item.id) === String(id); });
+        if (!report) return;
+        var status = returnButton ? "Требует уточнения" : "Подтверждено";
+        var reach = Number(report.reach || 0);
+        if (confirmButton) {
+          var entered = window.prompt("Введите факт охвата по скриншотам",String(reach));
+          if (entered == null) return;
+          reach = Number(String(entered).replace(/\s/g,"").replace(",","."));
+          if (!Number.isFinite(reach) || reach < 0) return showToast("Введите корректный факт охвата");
+        }
+        apiFetch("/api/evidence-reports",{method:"PATCH",headers:{"content-type":"application/json","x-nsl-role":role},body:JSON.stringify({id:id,status:status,reach:Math.round(reach)})}).then(function (response) {
+          if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось проверить отчёт"); });
+          return response.json();
+        }).then(function (data) {
+          evidenceReports = evidenceReports.map(function (item) { return String(item.id) === String(id) ? data.report : item; });
+          applyEvidenceFactsToBloggers();
+          refreshAllDerivedViews();
+          showToast(status === "Подтверждено" ? "Охват проверен и подтверждён" : "Отчёт отправлен на уточнение");
+        }).catch(function (error) { showToast(error && error.message ? error.message : "Не удалось проверить отчёт"); });
       });
       function openPlacementCreator(origin,bloggerId) {
         if (role === "analyst") return showToast("У аналитика доступ только на просмотр");

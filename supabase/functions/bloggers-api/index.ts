@@ -722,6 +722,20 @@ Deno.serve(async (request: Request) => {
   if (path === "/api/evidence-reports") {
     await ensureBucket(admin);
     if (request.method === "GET") { const { data, error } = await admin.from("blogger_evidence_reports").select("*").order("created_at", { ascending: false }); if (error) return json(request, { error: error.message }, 500); return json(request, { reports: await signedEvidenceReports(admin, data || []) }); }
+    if (request.method === "PATCH") {
+      if (role !== "leader") return json(request, { error: "Проверять фактические охваты может только администратор" }, 403);
+      const body = await request.json().catch(() => null);
+      const id = String(body?.id || "");
+      const status = String(body?.status || "");
+      const reach = Number(body?.reach);
+      const allowedStatuses = new Set(["На проверке", "Подтверждено", "Требует уточнения"]);
+      if (!/^[0-9a-f-]{36}$/i.test(id) || !allowedStatuses.has(status) || !Number.isFinite(reach) || reach < 0 || reach > 100000000) return json(request, { error: "Проверьте статус и факт охвата" }, 400);
+      const { data, error } = await admin.from("blogger_evidence_reports").update({ status, reach: Math.round(reach) }).eq("id", id).select("*").maybeSingle();
+      if (error) return json(request, { error: error.message }, 500);
+      if (!data) return json(request, { error: "Отчёт не найден" }, 404);
+      const [report] = await signedEvidenceReports(admin, [data]);
+      return json(request, { report });
+    }
     if (request.method === "POST") {
       if (!writable(role)) return json(request, { error: "Недостаточно прав" }, 403);
       const form = await request.formData();
@@ -750,7 +764,7 @@ Deno.serve(async (request: Request) => {
         if (error) return json(request, { error: "Не удалось загрузить фотографию" }, 500);
         images.push({ id: imageId, name: safeFileName(file.name), size: file.size, type: file.type, path: objectPath });
       }
-      const row = { id, blogger, exit_date: date, reach: Math.round(reach), clicks: Math.max(0, Math.round(clicks)), uploader, status: "Подтверждено", comment, images_json: images, created_by: userId };
+      const row = { id, blogger, exit_date: date, reach: Math.round(reach), clicks: Math.max(0, Math.round(clicks)), uploader, status: role === "leader" ? "Подтверждено" : "На проверке", comment, images_json: images, created_by: userId };
       const { error } = await admin.from("blogger_evidence_reports").insert(row);
       if (error) return json(request, { error: error.message }, 500);
       const [report] = await signedEvidenceReports(admin, [{ ...row, created_at: new Date().toISOString() }]);
