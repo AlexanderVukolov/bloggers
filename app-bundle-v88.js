@@ -824,6 +824,48 @@
         text = text.split(/[?#]/)[0].replace(/^@/,"").replace(/\/+$/,"");
         return text;
       }
+      function bloggerIdentityAliases(blogger) {
+        return ([].concat(blogger && blogger._identityAliases || [],[
+          blogger && blogger.sourceKey,
+          blogger && blogger.name,
+          blogger && blogger.display,
+          blogger && blogger.link
+        ])).map(normalizeBloggerIdentity).filter(function (identity,index,array) {
+          return identity && array.indexOf(identity) === index;
+        });
+      }
+      function groupedKpiBloggers() {
+        var groups = [];
+        bloggers.forEach(function (blogger) {
+          var aliases = bloggerIdentityAliases(blogger);
+          var matched = groups.filter(function (group) {
+            return aliases.some(function (identity) { return group.aliases.indexOf(identity) >= 0; });
+          });
+          if (!matched.length) {
+            groups.push({cards:[blogger],aliases:aliases.slice()});
+            return;
+          }
+          var target = matched[0];
+          target.cards.push(blogger);
+          aliases.forEach(function (identity) { if (target.aliases.indexOf(identity) < 0) target.aliases.push(identity); });
+          matched.slice(1).forEach(function (duplicateGroup) {
+            duplicateGroup.cards.forEach(function (card) { if (target.cards.indexOf(card) < 0) target.cards.push(card); });
+            duplicateGroup.aliases.forEach(function (identity) { if (target.aliases.indexOf(identity) < 0) target.aliases.push(identity); });
+            groups.splice(groups.indexOf(duplicateGroup),1);
+          });
+        });
+        return groups.map(function (group) {
+          var canonical = group.cards.slice().sort(function (a,b) {
+            var aTime = createdTimestamp(a) || Number.MAX_SAFE_INTEGER;
+            var bTime = createdTimestamp(b) || Number.MAX_SAFE_INTEGER;
+            return aTime - bTime || String(a.id || "").localeCompare(String(b.id || ""));
+          })[0];
+          return Object.assign({},canonical,{
+            _identityAliases:group.aliases.slice(),
+            _kpiDuplicateIds:group.cards.map(function (card) { return String(card.id); })
+          });
+        });
+      }
       var bloggerLookupIndex = null;
       var synchronizedPlacementCache = null;
       var synchronizedExitCache = null;
@@ -888,7 +930,7 @@
         if (!item || !blogger) return false;
         if (item.bloggerId != null && String(item.bloggerId) === String(blogger.id)) return true;
         var placementIdentities = [item.sourceKey,item.tag,item.bloggerLink].map(normalizeBloggerIdentity).filter(Boolean);
-        var bloggerIdentities = [blogger.sourceKey,blogger.name,blogger.display,blogger.link].map(normalizeBloggerIdentity).filter(Boolean);
+        var bloggerIdentities = bloggerIdentityAliases(blogger);
         return placementIdentities.some(function (identity) { return bloggerIdentities.indexOf(identity) >= 0; });
       }
       function linkedBloggerForPlacement(item) {
@@ -2888,7 +2930,7 @@
         };
       }
       function automaticKpiMonthBloggers(month) {
-        return bloggers.map(function (blogger) {
+        return groupedKpiBloggers().map(function (blogger) {
           var confirmedExit = confirmedKpiExitForBlogger(blogger);
           var createdInMonth = monthFromDateValue(blogger.createdAt) === month;
           var firstExitInMonth = monthFromDateValue(confirmedExit.date) === month;
@@ -2903,7 +2945,7 @@
             managerFactReach:confirmedExit.factReach,
             managerEligible:confirmedExit.eligible && firstExitInMonth,
             confirmedExitDates:confirmedExit.dates,
-            note:confirmedExit.reason,
+            note:confirmedExit.reason + (blogger._kpiDuplicateIds && blogger._kpiDuplicateIds.length > 1 ? " · объединено карточек: " + blogger._kpiDuplicateIds.length : ""),
             automatic:true
           };
         }).filter(Boolean);
