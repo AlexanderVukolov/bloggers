@@ -71,7 +71,13 @@
   if (kpiCalculatorView) {
     kpiCalculatorView.insertAdjacentHTML("afterbegin", '<article class="card card-pad" id="kpiReachPlanSection" style="margin-bottom:16px"><div class="card-title"><div><h3>План по охвату</h3><p>Отдельный план и факт охвата по каждому менеджеру</p></div><span class="badge badge-blue" id="kpiReachPlanMonth">Текущий месяц</span></div><div class="table-wrap"><table style="min-width:760px"><thead><tr><th>Менеджер</th><th>План охвата</th><th>Подтверждённый факт</th><th>Выполнение</th></tr></thead><tbody id="kpiReachPlanTable"></tbody></table></div></article>');
     var rosterHeading = document.getElementById("kpiBloggerRosterTable").closest("article").querySelector(".card-title div");
-    if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI новых блогеров</h3><p>Для менеджера KPI начисляется только по блогерам, добавленным в выбранном календарном месяце, если до конца этого же месяца подтверждены дата выхода и фактический охват.</p>';
+    if (rosterHeading) rosterHeading.innerHTML = '<h3>KPI за первый выход нового блогера</h3><p>Добавление карточки в базу не считается результатом. KPI менеджеру и ассистенту начисляется в месяц первого фактического размещения только после подтверждённого отчёта с фото статистики и охватом.</p>';
+    var kpiBloggerReachInput = document.getElementById("kpiBloggerReach");
+    if (kpiBloggerReachInput) {
+      kpiBloggerReachInput.readOnly = true;
+      kpiBloggerReachInput.closest(".field").querySelector("label").textContent = "Охват первого подтверждённого выхода";
+      kpiBloggerReachInput.insertAdjacentHTML("afterend", '<small>Подставляется только из подтверждённого отчёта по фактическому охвату. Вручную KPI создать нельзя.</small>');
+    }
   }
 
   var salaryTable = document.getElementById("salaryTable");
@@ -79,7 +85,7 @@
     var salaryHeaders = salaryTable.closest("table").querySelectorAll("thead th");
     ["Кат. A","Кат. B","Кат. C"].forEach(function (label,index) { if (salaryHeaders[index + 3]) salaryHeaders[index + 3].textContent = label; });
     var salaryNote = salaryTable.closest(".card").querySelector(".table-note");
-    if (salaryNote) salaryNote.textContent = "Оклад и KPI рассчитываются автоматически. Для менеджеров учитываются только новые блогеры с подтверждённым выходом и фактом охвата внутри календарного месяца. Администратор может изменить оклад, KPI за охват и санкции.";
+    if (salaryNote) salaryNote.textContent = "Оклад и KPI рассчитываются автоматически. Для менеджеров и ассистентов новый блогер учитывается только один раз — по первому фактическому размещению с подтверждённым фотоотчётом и охватом. Добавление карточки в базу не начисляет KPI. Администратор может изменить оклад, KPI за выполнение плана охвата и санкции.";
     var salarySummary = document.getElementById("salarySummaryGrid");
     salarySummary.insertAdjacentHTML("afterend", '<article class="card card-pad" id="salaryPolicyCard" style="margin-bottom:16px"><div class="card-title"><div><h3>Правила начисления</h3><p>Категория определяется по охвату нового блогера; на границе 3000 начинается B, на границе 5000 — C</p></div><span class="badge badge-green">Считается автоматически</span></div><div class="grid grid-2"><div class="quality-item"><div><strong>Менеджеры · KPI за блогеров</strong><small>A: 1 000–2 999 — 500 ₽ · B: 3 000–4 999 — 2 700 ₽ · C: от 5 000 — 5 000 ₽</small></div></div><div class="quality-item"><div><strong>Ассистенты · KPI за блогеров</strong><small>A: 1 000–2 999 — 250 ₽ · B: 3 000–4 999 — 1 350 ₽ · C: от 5 000 — 2 500 ₽</small></div></div><div class="quality-item" style="grid-column:1/-1"><div><strong>Менеджеры · KPI за выполнение плана охвата</strong><small>70–79,99% — 6 000 ₽ · 80–89,99% — 10 000 ₽ · 90–99,99% — 15 000 ₽ · 100% и выше — 20 000 ₽</small></div></div></div></article>');
   }
@@ -2832,60 +2838,93 @@
       function newBloggersForMonth(month) {
         return bloggers.filter(function (blogger) { return monthFromDateValue(blogger.createdAt) === month; }).sort(function (a,b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); });
       }
-      function confirmedKpiExitForBlogger(blogger,month) {
-        var byDate = {};
+      function confirmedKpiExitForBlogger(blogger) {
+        var evidenceByDate = {};
+        evidenceReports.filter(function (report) {
+          var reach = Number(report.reach || 0);
+          return (!report.status || report.status === "Подтверждено") &&
+            Array.isArray(report.images) && report.images.length > 0 &&
+            Number.isFinite(reach) && reach > 0 && reach <= MAX_BLOGGER_REACH &&
+            placementMatchesBlogger({tag:report.blogger,bloggerLink:report.blogger},blogger);
+        }).forEach(function (report) {
+          var date = String(report.date || "");
+          var reach = Number(report.reach || 0);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+          evidenceByDate[date] = Math.max(Number(evidenceByDate[date] || 0),reach);
+        });
+
+        var placementsByDate = {};
         synchronizedPlacementRecords().filter(function (item) {
-          return placementMatchesBlogger(item,blogger) && monthFromDateValue(placementIsoDate(item)) === month;
+          return placementMatchesBlogger(item,blogger);
         }).forEach(function (item) {
           var date = placementIsoDate(item);
-          if (!date) return;
-          if (!byDate[date]) byDate[date] = {placement:0,evidence:0};
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) return;
+          if (!placementsByDate[date]) placementsByDate[date] = {hasFact:false,manager:""};
           var facts = placementFormatActuals[placementOverrideKey(item)] || {};
           var splitActual = Object.keys(facts).reduce(function (sum,format) {
             var value = Number(facts[format]);
             return sum + (Number.isFinite(value) && value > 0 ? value : 0);
           },0);
           var directActual = effectivePlacementActual(item);
-          var confirmedActual = Math.max(splitActual,directActual != null && directActual > 0 && !item._cardSyncedActual ? directActual : 0);
-          byDate[date].placement += confirmedActual;
+          var hasDirectActual = directActual != null && Number(directActual) > 0 && !item._cardSyncedActual;
+          placementsByDate[date].hasFact = placementsByDate[date].hasFact || splitActual > 0 || hasDirectActual || Number(evidenceByDate[date] || 0) > 0;
+          if (!placementsByDate[date].manager && item.manager) placementsByDate[date].manager = item.manager;
         });
-        evidenceReports.filter(function (report) {
-          return monthFromDateValue(report.date) === month && (!report.status || report.status === "Подтверждено") && placementMatchesBlogger({tag:report.blogger,bloggerLink:report.blogger},blogger);
-        }).forEach(function (report) {
-          var date = String(report.date || "");
-          var reach = Number(report.reach || 0);
-          if (!date || !Number.isFinite(reach) || reach <= 0 || reach > MAX_BLOGGER_REACH) return;
-          if (!byDate[date]) byDate[date] = {placement:0,evidence:0};
-          byDate[date].evidence = Math.max(byDate[date].evidence,reach);
-        });
-        var dates = Object.keys(byDate).filter(function (date) { return Math.max(byDate[date].placement,byDate[date].evidence) > 0; }).sort();
-        var factReach = dates.reduce(function (sum,date) { return sum + Math.max(byDate[date].placement,byDate[date].evidence); },0);
-        return {eligible:factReach > 0,factReach:Math.round(factReach),dates:dates};
+
+        var firstExitDate = Object.keys(placementsByDate).filter(function (date) {
+          return placementsByDate[date].hasFact || Number(evidenceByDate[date] || 0) > 0;
+        }).sort()[0] || "";
+        if (!firstExitDate) return {eligible:false,factReach:0,date:"",dates:[],manager:"",reason:"Ожидается первый фактический выход и отчёт по охвату"};
+
+        var factReach = Math.round(Number(evidenceByDate[firstExitDate] || 0));
+        var eligible = factReach > 0;
+        return {
+          eligible:eligible,
+          factReach:eligible ? factReach : 0,
+          date:firstExitDate,
+          dates:[firstExitDate],
+          manager:placementsByDate[firstExitDate].manager || "",
+          reason:eligible ? "Первый выход подтверждён отчётом: " + dailyDateLabel(firstExitDate) : "Первый выход " + dailyDateLabel(firstExitDate) + " · ожидается подтверждённый отчёт с фото статистики"
+        };
       }
       function automaticKpiMonthBloggers(month) {
-        return newBloggersForMonth(month).map(function (blogger) {
-          var confirmedExit = confirmedKpiExitForBlogger(blogger,month);
+        return bloggers.map(function (blogger) {
+          var confirmedExit = confirmedKpiExitForBlogger(blogger);
+          var createdInMonth = monthFromDateValue(blogger.createdAt) === month;
+          var firstExitInMonth = monthFromDateValue(confirmedExit.date) === month;
+          if (!createdInMonth && !firstExitInMonth) return null;
           return {
             month:month,
             bloggerKey:String(blogger.id),
             bloggerName:blogger.display || blogger.name,
-            manager:blogger.manager || (blogger.createdByRole === "manager" ? blogger.createdByName || "" : "") || "Не назначен",
+            manager:confirmedExit.manager || blogger.manager || (blogger.createdByRole === "manager" ? blogger.createdByName || "" : "") || "Не назначен",
             assistant:blogger.createdByRole === "assistant" ? blogger.createdByName || "" : "",
-            factReach:Math.max(0,Number(blogger.reach || 0)),
+            factReach:confirmedExit.factReach,
             managerFactReach:confirmedExit.factReach,
-            managerEligible:confirmedExit.eligible,
+            managerEligible:confirmedExit.eligible && firstExitInMonth,
             confirmedExitDates:confirmedExit.dates,
-            note:confirmedExit.eligible ? "Подтверждённый выход: " + confirmedExit.dates.map(dailyDateLabel).join(", ") : "Ожидается подтверждённый выход и факт охвата до конца месяца",
+            note:confirmedExit.reason,
             automatic:true
           };
-        });
+        }).filter(Boolean);
       }
       function resolvedKpiMonthBloggers(month) {
         var byKey = {};
         automaticKpiMonthBloggers(month).forEach(function (item) { byKey[String(item.bloggerKey)] = item; });
         kpiMonthBloggers.filter(function (item) { return item.month === month; }).forEach(function (item) {
-          var previous = byKey[String(item.bloggerKey)] || {};
-          byKey[String(item.bloggerKey)] = Object.assign({},previous,item,{automatic:Boolean(previous.automatic)});
+          var previous = byKey[String(item.bloggerKey)];
+          if (!previous) {
+            byKey[String(item.bloggerKey)] = Object.assign({},item,{factReach:0,managerFactReach:0,managerEligible:false,confirmedExitDates:[],note:"Не зачтён: нет первого подтверждённого выхода с фото статистики",automatic:false});
+            return;
+          }
+          byKey[String(item.bloggerKey)] = Object.assign({},previous,item,{
+            factReach:previous.factReach,
+            managerFactReach:previous.managerFactReach,
+            managerEligible:previous.managerEligible,
+            confirmedExitDates:previous.confirmedExitDates,
+            note:previous.note,
+            automatic:true
+          });
         });
         return Object.keys(byKey).map(function (key) { return byKey[key]; });
       }
@@ -2956,12 +2995,12 @@
       function bloggerKpiForEmployee(employeeOrName,roleName,month) {
         var records = resolvedKpiMonthBloggers(month).filter(function (item) {
           var responsible = roleName === "assistant" ? item.assistant : item.manager;
-          return responsible && salaryEmployeeNameMatches(employeeOrName,responsible) && (roleName !== "manager" || item.managerEligible === true);
+          return responsible && salaryEmployeeNameMatches(employeeOrName,responsible) && item.managerEligible === true;
         });
         var counts = {a:0,b:0,c:0};
         var factReach = 0;
         records.forEach(function (item) {
-          var reach = Math.max(0,Number(roleName === "manager" ? item.managerFactReach || 0 : item.factReach || 0));
+          var reach = Math.max(0,Number(item.managerFactReach || 0));
           var category = salaryBloggerCategory(reach);
           factReach += reach;
           if (category) counts[category] += 1;
@@ -3056,10 +3095,11 @@
         var month = document.getElementById("kpiMonthSelect").value || activeMonthKey();
         if (!blogger) return;
         if (force || !document.getElementById("kpiRosterManagerSelect").value) document.getElementById("kpiRosterManagerSelect").value = kpiManagers().indexOf(blogger.manager) >= 0 ? blogger.manager : (document.getElementById("kpiManagerSelect").value || kpiManagers()[0] || "");
-        var monthlyReach = placementRowsForBlogger(blogger).filter(function (item) { return (item.sortDate || "").slice(0,7) === month; }).reduce(function (sum,item) { var value = Number(item.actual || 0); return sum + (Number.isFinite(value) && value > 0 ? value : 0); },0);
+        var firstExit = confirmedKpiExitForBlogger(blogger);
         var saved = kpiMonthBloggers.find(function (item) { return item.month === month && String(item.bloggerKey) === String(blogger.id); });
-        document.getElementById("kpiBloggerReach").value = saved ? Number(saved.factReach || 0) : Math.round(monthlyReach);
-        document.getElementById("kpiBloggerNote").value = saved ? saved.note || "" : "";
+        var firstExitInMonth = monthFromDateValue(firstExit.date) === month;
+        document.getElementById("kpiBloggerReach").value = firstExitInMonth && firstExit.eligible ? firstExit.factReach : 0;
+        document.getElementById("kpiBloggerNote").value = firstExit.reason || "";
         if (saved) document.getElementById("kpiRosterManagerSelect").value = saved.manager;
       }
       function renderKpiBloggerRoster() {
@@ -3387,7 +3427,7 @@
         document.getElementById("kpiManualReachAmount").value = result.reachKpi;
         document.getElementById("kpiBaseSalary").value = result.base;
         document.getElementById("kpiSanctions").value = result.sanctions;
-        document.getElementById("kpiCalculatorSource").textContent = "Расчёт за " + kpiMonthLabel(month).toLowerCase() + ": " + result.placements + " размещений с фактическим охватом, " + result.manualCount + " новых блогеров месяца учтено автоматически или уточнено администратором, " + result.confirmed + " зачтено в KPI, " + result.pending + " ожидают ввода. Автоматическая сумма KPI за охват — " + money(result.autoReachKpi) + "; администратор может заменить её вручную.";
+        document.getElementById("kpiCalculatorSource").textContent = "Расчёт за " + kpiMonthLabel(month).toLowerCase() + ": " + result.placements + " размещений с фактическим охватом, " + result.confirmed + " первых выходов новых блогеров подтверждены отчётом и зачтены в KPI, " + result.pending + " ожидают первый выход или фото статистики. Добавление карточки в базу не начисляет KPI. Автоматическая сумма KPI за выполнение плана охвата — " + money(result.autoReachKpi) + "; администратор может заменить её вручную.";
         renderKpiCalculator();
       }
       function renderAcceptanceStatus() {
@@ -5324,9 +5364,9 @@
         var factReach = Number(document.getElementById("kpiBloggerReach").value || 0);
         if (!blogger || !month || !manager || !Number.isFinite(factReach) || factReach < 0) return showToast("Проверьте блогера, менеджера и фактический охват");
         event.currentTarget.disabled = true;
-        persistKpiMonthBlogger({month:month,bloggerKey:String(blogger.id),bloggerName:blogger.display || blogger.name,manager:manager,factReach:Math.round(factReach),note:document.getElementById("kpiBloggerNote").value}).then(function () {
+        persistKpiMonthBlogger({month:month,bloggerKey:String(blogger.id),bloggerName:blogger.display || blogger.name,manager:manager,factReach:0,note:"Ответственный назначен вручную. KPI появится только после первого подтверждённого выхода с фото статистики."}).then(function () {
           renderKpiBloggerRoster(); renderSalaryTable(); loadKpiFromData(); renderEmployees();
-          showToast("Блогер добавлен в KPI за " + kpiMonthLabel(month));
+          showToast("Ответственный сохранён. KPI начислится только после первого подтверждённого выхода");
         }).catch(function (error) { showToast(error.message || "Не удалось добавить блогера в KPI"); }).finally(function () { event.currentTarget.disabled = false; });
       });
       document.getElementById("kpiBloggerRosterTable").addEventListener("click",function (event) {
