@@ -142,6 +142,26 @@ test("blogger export downloads the currently filtered rows as Excel",() => {
   assert.match(source,/bloggerExportBtn"\)\.addEventListener\("click",exportBloggerWorkbook\)/);
 });
 
+test("KPI groups duplicate blogger cards before counting the first confirmed exit",() => {
+  const context = {
+    Object,Number,String,Math,
+    bloggers:[
+      {id:1,name:"@same_blogger",link:"https://instagram.com/same_blogger",createdAt:"2026-08-20T10:00:00Z",createdByRole:"manager",createdByName:"Менеджер"},
+      {id:2,name:"same_blogger",link:"https://www.instagram.com/same_blogger?ref=duplicate",createdAt:"2026-09-02T10:00:00Z",createdByRole:"assistant",createdByName:"Ассистент"},
+      {id:3,name:"@another",link:"https://instagram.com/another",createdAt:"2026-09-03T10:00:00Z",createdByRole:"assistant",createdByName:"Ассистент"},
+    ],
+    createdTimestamp:item => Date.parse(item.createdAt || "") || 0,
+  };
+  vm.createContext(context);
+  ["normalizeBloggerIdentity","bloggerIdentityAliases","groupedKpiBloggers"].forEach(name => vm.runInContext(extractFunction(name),context));
+  const grouped = context.groupedKpiBloggers();
+  assert.equal(grouped.length,2);
+  const duplicate = grouped.find(item => item._identityAliases.includes("same_blogger"));
+  assert.deepEqual(Array.from(duplicate._kpiDuplicateIds),["1","2"]);
+  assert.equal(duplicate.id,1);
+  assert.equal(duplicate.createdByRole,"manager");
+});
+
 test("one blogger and date count as one exit while distinct formats add reach",() => {
   const placements = [
     {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},
@@ -274,16 +294,17 @@ test("confirmed manager KPI reach is tied to exit dates inside the blogger creat
     placementFormatActuals:{},
     placementOverrideKey:item => String(item.id),
     effectivePlacementActual:item => item.actual,
+    dailyDateLabel:value => value,
     evidenceReports:[
-      {blogger:"@new_blogger",date:"2026-08-20",reach:3000,status:"Подтверждено"},
-      {blogger:"@new_blogger",date:"2026-08-25",reach:500,status:"Подтверждено"},
-      {blogger:"@new_blogger",date:"2026-09-01",reach:10000,status:"Подтверждено"},
+      {blogger:"@new_blogger",date:"2026-08-20",reach:3000,status:"Подтверждено",images:["proof"]},
+      {blogger:"@new_blogger",date:"2026-08-25",reach:500,status:"Подтверждено",images:["proof"]},
+      {blogger:"@new_blogger",date:"2026-09-01",reach:10000,status:"Подтверждено",images:["proof"]},
     ],
   };
   const result = runFunction("confirmedKpiExitForBlogger",context)(blogger,"2026-08");
   assert.equal(result.eligible,true);
-  assert.equal(result.factReach,3500);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.dates)),["2026-08-20","2026-08-25"]);
+  assert.equal(result.factReach,3000);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.dates)),["2026-08-20"]);
 });
 
 test("all bloggers created in the month are present in KPI and a manual row only refines data",() => {
@@ -295,7 +316,8 @@ test("all bloggers created in the month are present in KPI and a manual row only
       {id:3,name:"old",display:"Old",createdAt:"2026-07-03T10:00:00Z",manager:"Manager",reach:300},
     ],
     monthFromDateValue:value => String(value || "").slice(0,7),
-    confirmedKpiExitForBlogger:blogger => blogger.id === 1 ? {eligible:true,factReach:1200,dates:["2026-08-20"]} : {eligible:false,factReach:0,dates:[]},
+    groupedKpiBloggers:() => context.bloggers,
+    confirmedKpiExitForBlogger:blogger => blogger.id === 1 ? {eligible:true,factReach:1200,date:"2026-08-20",dates:["2026-08-20"],manager:"Manager",reason:"Подтверждено"} : {eligible:false,factReach:0,date:"",dates:[],manager:"",reason:"Ожидается"},
     dailyDateLabel:value => value,
     kpiMonthBloggers:[{month:"2026-08",bloggerKey:"1",bloggerName:"One",manager:"Manager",factReach:150,note:"checked"}],
   };
@@ -305,7 +327,7 @@ test("all bloggers created in the month are present in KPI and a manual row only
   });
   const records = context.resolvedKpiMonthBloggers("2026-08").sort((a,b) => a.bloggerKey.localeCompare(b.bloggerKey));
   assert.equal(records.length,2);
-  assert.equal(records[0].factReach,150);
+  assert.equal(records[0].factReach,1200);
   assert.equal(records[0].managerFactReach,1200);
   assert.equal(records[0].managerEligible,true);
   assert.equal(records[0].assistant,"Assistant");
@@ -461,18 +483,18 @@ test("Sudarynova assistant KPI uses the August roster and assistant category amo
   const context = {
     Object,Number,String,Math,SALARY_RULES:salaryRules,
     resolvedKpiMonthBloggers:() => [
-      {assistant:"Сударинова Юлия",factReach:7000},
-      {assistant:"Сударинова Юлия",factReach:13000},
-      {assistant:"Сударинова Юлия",factReach:5000},
-      {assistant:"Сударинова Юлия",factReach:2500},
-      {assistant:"Сударинова Юлия",factReach:40000},
-      {assistant:"Сударинова Юлия",factReach:5000},
-      {assistant:"Сударинова Юлия",factReach:1500},
-      {assistant:"Сударинова Юлия",factReach:0},
-      {assistant:"Сударинова Юлия",factReach:1000},
-      {assistant:"Сударинова Юлия",factReach:2000},
-      {assistant:"Сударинова Юлия",factReach:70},
-      {assistant:"Другой ассистент",manager:"Оксана Пичушкина",factReach:9000},
+      {assistant:"Сударинова Юлия",managerFactReach:7000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:13000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:5000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:2500,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:40000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:5000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:1500,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:0,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:1000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:2000,managerEligible:true},
+      {assistant:"Сударинова Юлия",managerFactReach:70,managerEligible:true},
+      {assistant:"Другой ассистент",manager:"Оксана Пичушкина",managerFactReach:9000,managerEligible:true},
     ],
     employeeNameMatches:(expected,actual) => expected === actual,
     salaryProfileForName:() => ({firstName:"Юлия",lastName:"Сударинова"}),
