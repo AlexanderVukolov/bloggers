@@ -88,6 +88,10 @@ test("placement guarantee is copied from the blogger card and kept separate from
 test("actual reach form searches bloggers instead of exposing the long select",() => {
   const candidates = runFunction("evidenceBloggerCandidates",{
     String,
+    normalizeBloggerIdentity:value => String(value || "").trim().toLowerCase().replace(/^https?:\/\/(?:www\.)?instagram\.com\//,"").replace(/^@/,"").replace(/\/+$/,"").split(/[?#]/)[0],
+    bloggerIdentityAliases:blogger => [blogger.sourceKey,blogger.name,blogger.display,blogger.link].map(value => String(value || "").trim().toLowerCase().replace(/^https?:\/\/(?:www\.)?instagram\.com\//,"").replace(/^@/,"").replace(/\/+$/,"").split(/[?#]/)[0]).filter(Boolean),
+    synchronizedPlacementRecords:() => [],
+    evidenceReports:[],
     bloggers:[
       {name:"@anna_fit",display:"Анна",link:"https://instagram.com/anna_fit",sourceKey:"anna-fit"},
       {name:"@maria_nsl",display:"Мария",link:"https://instagram.com/maria_nsl",sourceKey:"maria-nsl"},
@@ -218,6 +222,17 @@ test("one reach report applies to one exact placement in every matching project"
   placements.push({id:"ln-2",project:"ЛН"});
   assert.deepEqual(Array.from(context.reachAuditReportPlacementKeys({blogger:"@any_blogger"})),[]);
   assert.doesNotMatch(extractFunction("reachAuditReportPlacementKeys"),/fitby_zlata/);
+});
+
+test("evidence blogger search tolerates one typo and keeps unlinked reports saveable",() => {
+  const context = {String,Math,Array,normalizeBloggerIdentity:value => String(value || "").trim().toLowerCase().replace(/^@/,"")};
+  vm.createContext(context);
+  vm.runInContext(extractFunction("bloggerIdentityDistance"),context);
+  assert.equal(context.bloggerIdentityDistance("@viktoriyayok7","@viktoriyaok7"),1);
+  assert.equal(context.bloggerIdentityDistance("@viktoriyaok7","@viktoriyaok7"),0);
+  assert.match(extractFunction("updateEvidenceBloggerSearch"),/distance <= 1/);
+  assert.match(source,/размещение не найдено\. Отчёт сохранится без связи/);
+  assert.match(source,/!placementLinks\.length && placementSelect && placementSelect\.options\.length/);
 });
 
 test("finance uses the two project sheets for clicks, costs and ROI",() => {
