@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v123-blogger-search";
+const CACHE_NAME = "nsl-bloggers-github-v124-october-exits";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,
@@ -12,6 +12,7 @@ const APP_SHELL = [
   `${APP_ROOT}traffic-guard-v114.js`,
   `${APP_ROOT}placement-export.js`,
   `${APP_ROOT}app-bundle-v88.js`,
+  `${APP_ROOT}october-exits-v124.js`,
 ];
 
 self.addEventListener("install", (event) => {
