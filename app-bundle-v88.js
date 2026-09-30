@@ -1036,6 +1036,18 @@
           return target;
         });
       }
+      function distinctPlacementRowsById(rows) {
+        var result = [];
+        var positions = {};
+        (rows || []).forEach(function (item) {
+          var id = item && item.id != null && item.id !== "" ? String(item.id) : "";
+          if (!id) { result.push(item); return; }
+          if (positions[id] == null) { positions[id] = result.length; result.push(item); return; }
+          var current = result[positions[id]];
+          result[positions[id]] = Object.assign({},current,item);
+        });
+        return result;
+      }
       function synchronizedPlacementRecords() {
         if (synchronizedPlacementCache) return synchronizedPlacementCache;
         var rows = placementRecords.filter(function (item) { return !placementIsDeleted(item); });
@@ -1090,7 +1102,7 @@
             });
           }
         });
-        synchronizedPlacementCache = deduplicatePlacementRows(additions.concat(rows));
+        synchronizedPlacementCache = distinctPlacementRowsById(additions.concat(rows));
         return synchronizedPlacementCache;
       }
       function effectivePlacementActual(item) {
@@ -1270,6 +1282,145 @@
         function iso(date) { return [date.getFullYear(),String(date.getMonth()+1).padStart(2,"0"),String(date.getDate()).padStart(2,"0")].join("-"); }
         return {start:iso(start),end:iso(end)};
       }
+      function reachAuditCanView() {
+        var name = String(currentEmployeeProfile && currentEmployeeProfile.name || "").toLowerCase().replace(/ё/g,"е");
+        return role === "leader" || (name.indexOf("мария") >= 0 && name.indexOf("штык") >= 0);
+      }
+      function reachAuditWeekBounds(value) {
+        var date = /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? new Date(value + "T00:00:00") : new Date(localTodayIso() + "T00:00:00");
+        var offset = (date.getDay() + 6) % 7;
+        var start = new Date(date); start.setDate(date.getDate() - offset);
+        var end = new Date(start); end.setDate(start.getDate() + 6);
+        function iso(item) { return [item.getFullYear(),String(item.getMonth()+1).padStart(2,"0"),String(item.getDate()).padStart(2,"0")].join("-"); }
+        return {start:iso(start),end:iso(end)};
+      }
+      function reachAuditPlacementKey(item) { return placementOverrideKey(item); }
+      function reachAuditPlacementCandidates(report) {
+        var identity = normalizeBloggerIdentity(report && report.blogger);
+        var date = String(report && report.date || "");
+        if (!identity || !date) return [];
+        var aliases = [identity];
+        (ensureBloggerLookupIndex().byIdentity[identity] || []).forEach(function (blogger) {
+          bloggerIdentityAliases(blogger).forEach(function (alias) { if (aliases.indexOf(alias) < 0) aliases.push(alias); });
+        });
+        return synchronizedPlacementRecords().filter(function (item) {
+          var placementIdentity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink);
+          return aliases.indexOf(placementIdentity) >= 0 && placementIsoDate(item) === date;
+        });
+      }
+      function reachAuditReportPlacementKeys(report) {
+        var explicit = Array.isArray(report && report.placementKeys) ? report.placementKeys.map(String).filter(Boolean) : [];
+        if (explicit.length) return explicit;
+        var candidates = reachAuditPlacementCandidates(report);
+        if (candidates.length === 1) return [reachAuditPlacementKey(candidates[0])];
+        var byProject = {};
+        candidates.forEach(function (item) {
+          var project = placementDirection(item);
+          if (!byProject[project]) byProject[project] = [];
+          byProject[project].push(item);
+        });
+        if (Object.keys(byProject).length > 1 && Object.keys(byProject).every(function (project) { return byProject[project].length === 1; })) {
+          return Object.keys(byProject).map(function (project) { return reachAuditPlacementKey(byProject[project][0]); });
+        }
+        return [];
+      }
+      function reachAuditReportsForPlacement(item) {
+        var key = reachAuditPlacementKey(item);
+        return evidenceReports.filter(function (report) { return reachAuditReportPlacementKeys(report).indexOf(key) >= 0; });
+      }
+      function reachAuditRow(item) {
+        var reports = reachAuditReportsForPlacement(item);
+        var verifiedReports = reports.filter(function (report) { return report.status === "Подтверждено" || !report.status; });
+        var pendingReports = reports.filter(function (report) { return report.status && report.status !== "Подтверждено"; });
+        var directActual = effectivePlacementActual(item);
+        var reportReach = reports.reduce(function (max,report) { return Math.max(max,Math.max(0,Number(report.reach || 0))); },0);
+        var verifiedReach = verifiedReports.reduce(function (max,report) { return Math.max(max,Math.max(0,Number(report.reach || 0))); },0);
+        var factReach = Math.max(directActual == null ? 0 : directActual,reportReach);
+        var isVerified = factReach > 0 && verifiedReach >= factReach;
+        var date = placementIsoDate(item);
+        var occurred = Boolean(factReach > 0 || reports.length || (date && date <= localTodayIso()));
+        var status = !occurred ? "Запланирован" : factReach <= 0 ? "Ждём статистику" : isVerified ? "Факт проверен" : "Факт внесён, не проверен";
+        return {
+          placement:item,placementKey:reachAuditPlacementKey(item),placementId:String(item.id == null ? "" : item.id),
+          identity:normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink),blogger:item.tag || item.fullName || "—",
+          date:date,format:item.type || item.format || "—",project:placementDirection(item),manager:item.manager || "Не назначен",
+          guarantee:Math.max(0,Number(item.guaranteed || 0)),factReach:factReach,verifiedReach:verifiedReach,
+          reports:reports,verifiedReports:verifiedReports,pendingReports:pendingReports,isVerified:isVerified,occurred:occurred,status:status
+        };
+      }
+      function reachAuditRows(options) {
+        options = options || {};
+        var rows = synchronizedPlacementRecords().map(reachAuditRow);
+        rows.slice().forEach(function (row) {
+          var appliesToBoth = row.reports.some(function (report) {
+            return (report.placementLinks || []).some(function (link) { return link.placementKey === row.placementKey && link.project === "Оба"; });
+          });
+          if (!appliesToBoth || row.factReach <= 0 || ["ЛН","FIT PRO"].indexOf(row.project) < 0) return;
+          rows.push(Object.assign({},row,{project:row.project === "ЛН" ? "FIT PRO" : "ЛН",crossProjectAttribution:true}));
+        });
+        return rows.filter(function (row) {
+          return (!options.month || monthFromDateValue(row.date) === options.month) &&
+            (!options.start || row.date >= options.start) && (!options.end || row.date <= options.end) &&
+            (!options.direction || row.project === options.direction) &&
+            (!options.manager || employeeNameMatches(options.manager,row.manager));
+        });
+      }
+      function reachAuditSummary(rows) {
+        var bloggerKeys = {};
+        return rows.reduce(function (total,row) {
+          total.planned += 1;
+          if (row.occurred) total.occurred += 1;
+          if (row.occurred && row.factReach <= 0) total.missing += 1;
+          if (row.factReach > 0 && !row.isVerified) total.unverified += 1;
+          if (row.isVerified) total.verified += 1;
+          total.guaranteed += row.guarantee;
+          total.reach += row.factReach;
+          total.verifiedReach += row.verifiedReach;
+          bloggerKeys[row.identity || row.placementId] = true;
+          return total;
+        },{planned:0,occurred:0,missing:0,unverified:0,verified:0,guaranteed:0,reach:0,verifiedReach:0,bloggers:0});
+      }
+      function reachAuditDuplicateCandidates(rows) {
+        var result = [];
+        var placementGroups = {};
+        rows.forEach(function (row) {
+          var key = [row.identity,row.date,String(row.format).toLowerCase(),row.project].join("|");
+          (placementGroups[key] || (placementGroups[key] = [])).push(row);
+        });
+        Object.keys(placementGroups).forEach(function (key) {
+          var group = placementGroups[key];
+          if (group.length < 2) return;
+          var projects = {};
+          group.forEach(function (row) { projects[row.project] = true; });
+          if (Object.keys(projects).length > 1 && group.some(function (row) { return row.crossProjectAttribution; })) return;
+          group.forEach(function (row) { result.push({row:row,reason:"Одинаковые блогер, дата, формат и проект в " + group.length + " размещениях"}); });
+        });
+        evidenceReports.forEach(function (report) {
+          var keys = reachAuditReportPlacementKeys(report);
+          if (keys.length < 2) return;
+          var linkedRows = rows.filter(function (row) { return keys.indexOf(row.placementKey) >= 0; });
+          var projects = {};
+          linkedRows.forEach(function (row) { projects[row.project] = true; });
+          var explicitCrossProject = Object.keys(projects).length > 1;
+          if (!explicitCrossProject) linkedRows.forEach(function (row) { result.push({row:row,reason:"Один отчёт связан с " + keys.length + " размещениями одного проекта"}); });
+        });
+        return result.filter(function (item,index,array) { return array.findIndex(function (candidate) { return candidate.row.placementKey === item.row.placementKey && candidate.reason === item.reason; }) === index; });
+      }
+      function reachAuditFact(month,options) {
+        options = options || {};
+        var rows = reachAuditRows({month:month,direction:options.direction || "",manager:options.manager || ""});
+        var summary = reachAuditSummary(rows);
+        var bloggerKeys = {};
+        rows.forEach(function (row) { bloggerKeys[row.identity || row.placementId] = true; });
+        return rows.reduce(function (total,row) {
+          total.clicks += Math.max(Number(effectivePlacementClicks(row.placement) || 0),row.reports.reduce(function (max,report) { return Math.max(max,Number(report.clicks || 0)); },0));
+          total.leads += Math.max(0,Number(row.placement.leads || 0));
+          total.sales += Math.max(0,Number(row.placement.sales || 0));
+          total.revenue += Math.max(0,Number(row.placement.revenue || 0));
+          total.costs += Math.max(0,Number(row.placement.cost || 0));
+          return total;
+        },{direction:options.direction || "Все",exits:summary.occurred,guaranteed:summary.guaranteed,reach:summary.reach,clicks:0,leads:0,sales:0,revenue:0,costs:0,bloggers:Object.keys(bloggerKeys).length,source:"Проверяемые строки размещений и связанные отчёты"});
+      }
       function monthlyPlanSetting(manager,month) {
         if (!monthlyManagerPlans[month]) monthlyManagerPlans[month] = {};
         if (!monthlyManagerPlans[month][manager]) {
@@ -1283,6 +1434,8 @@
       }
       function canonicalMonthlyExitFact(month,options) {
         options = options || {};
+        return reachAuditFact(month,options);
+        /* Исторический алгоритм оставлен ниже только для обратной совместимости выгрузок старых версий. */
         var groups = {};
         var evidenceIncluded = false;
         function rowMatches(direction,manager) {
@@ -1391,7 +1544,6 @@
       }
       function monthlyManagerFact(manager,month) {
         var result = canonicalMonthlyExitFact(month,{manager:manager});
-        result.guaranteed = monthlyExitGuarantee(month,null,manager);
         return result;
       }
       function monthlyPlanInput(manager,month,field,value) {
@@ -1783,7 +1935,6 @@
       }
       function monthlyDirectionFact(month,direction) {
         var result = canonicalMonthlyExitFact(month,{direction:direction});
-        result.guaranteed = monthlyExitGuarantee(month,direction);
         return applyOfficialDirectionMetrics(result,month);
       }
       function dashboardDirectionCard(item,month) {
@@ -2142,8 +2293,10 @@
         if (record.namespace === "placement") {
           var existingPlacement = placementRecords.find(function (item) { return String(item.id) === String(value.id); });
           var existingCustom = customPlacementRecords.find(function (item) { return String(item.id) === String(value.id); });
+          var placementAlreadyPresent = Boolean(existingPlacement);
           if (existingPlacement) Object.assign(existingPlacement,value); else placementRecords.unshift(value);
           if (existingCustom) Object.assign(existingCustom,value); else customPlacementRecords.unshift(value);
+          if (!existingCustom && placementAlreadyPresent) customPlacementRecords = customPlacementRecords.filter(function (item) { return String(item.id) !== String(value.id); });
           initializeWarmupDates(existingPlacement || value);
           return;
         }
@@ -4223,10 +4376,122 @@
             ? '<div class="proof-stack">' + images + '<button class="proof-more" data-view-evidence="' + report.id + '">Открыть (' + report.images.length + ')</button></div>'
             : '<span class="badge badge-red">Нет файлов</span>';
           var statusClass = report.status === "Подтверждено" ? "badge-green" : report.status === "Требует уточнения" ? "badge-red" : "badge-amber";
-          var review = role === "leader" ? '<div class="table-actions"><button class="btn btn-sm btn-outline" type="button" data-confirm-evidence="' + report.id + '">Проверить</button><button class="btn btn-sm btn-outline" type="button" data-return-evidence="' + report.id + '">Уточнить</button></div>' : '';
-          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(report.blogger) + '</div><div><strong>' + report.blogger + '</strong><small>Отчёт по выходу</small></div></div></td><td>' + report.date.split("-").reverse().join(".") + '</td><td><b>' + new Intl.NumberFormat("ru-RU").format(report.reach) + '</b></td><td>' + new Intl.NumberFormat("ru-RU").format(report.clicks || 0) + '</td><td>' + proof + '</td><td>' + report.uploader + '</td><td><span class="badge ' + statusClass + '">' + report.status + '</span>' + review + '</td></tr>';
-        }).join("") || '<tr><td colspan="7"><div class="empty-state">У выбранного сотрудника пока нет отчётов по охватам.</div></td></tr>';
+          var keys = reachAuditReportPlacementKeys(report);
+          var linkLabel = keys.length ? keys.map(function (key) { var row = synchronizedPlacementRecords().find(function (item) { return reachAuditPlacementKey(item) === key; }); return row ? "#" + safeText(row.id) + " · " + safeText(row.type || "формат") : safeText(key.slice(-24)); }).join("<br>") : '<span class="badge badge-red">Не привязан</span>';
+          var review = role === "leader" ? '<div class="table-actions"><button class="btn btn-sm btn-outline" type="button" data-link-evidence="' + report.id + '">Привязать</button><button class="btn btn-sm btn-outline" type="button" data-confirm-evidence="' + report.id + '">Проверить</button><button class="btn btn-sm btn-outline" type="button" data-return-evidence="' + report.id + '">Уточнить</button></div>' : '';
+          return '<tr><td><div class="blogger-cell"><div class="mini-avatar">' + initials(report.blogger) + '</div><div><strong>' + safeText(report.blogger) + '</strong><small>Отчёт ' + safeText(report.id) + '</small></div></div></td><td>' + report.date.split("-").reverse().join(".") + '</td><td>' + linkLabel + '</td><td><b>' + new Intl.NumberFormat("ru-RU").format(report.reach) + '</b></td><td>' + new Intl.NumberFormat("ru-RU").format(report.clicks || 0) + '</td><td>' + proof + '</td><td>' + safeText(report.uploader) + '</td><td><span class="badge ' + statusClass + '">' + safeText(report.status) + '</span>' + review + '</td></tr>';
+        }).join("") || '<tr><td colspan="8"><div class="empty-state">У выбранного сотрудника пока нет отчётов по охватам.</div></td></tr>';
         document.getElementById("evidenceCountBadge").textContent = visibleReports.length + " из " + evidenceReports.length + " отчётов";
+        renderReachAuditAnalytics();
+      }
+      function reachAuditKpiHtml(label,value,foot,tone) {
+        return '<article class="card kpi"><div class="kpi-top"><span>' + safeText(label) + '</span><span class="kpi-icon">' + (tone || "◎") + '</span></div><div class="kpi-value">' + safeText(value) + '</div><div class="kpi-foot">' + safeText(foot) + '</div></article>';
+      }
+      function ensureReachAuditUi() {
+        if (document.getElementById("reachAuditPanel")) return;
+        var actualsView = document.getElementById("report-view-actuals");
+        var toolbar = actualsView && actualsView.querySelector(".context-toolbar");
+        if (!toolbar) return;
+        var panel = document.createElement("article");
+        panel.className = "card card-pad hidden";
+        panel.id = "reachAuditPanel";
+        panel.style.marginBottom = "16px";
+        panel.innerHTML = '<div class="card-title"><div><h3>Недельная аналитика охватов</h3><p>Доступно администратору и Марии · каждая цифра раскрывается до размещения и отчёта</p></div><span class="badge badge-green" id="reachAuditPeriodLabel">Неделя</span></div>' +
+          '<div class="toolbar" style="margin-bottom:14px"><label>Месяц</label><input class="input" id="reachAuditMonth" type="month" style="width:auto"><label>Неделя с датой</label><input class="input" id="reachAuditWeek" type="date" style="width:auto"><label>Проект</label><select class="select" id="reachAuditProject" style="width:auto"><option value="">Все проекты</option><option value="ЛН">ЛН</option><option value="FIT PRO">FIT PRO</option></select><label>Менеджер</label><select class="select" id="reachAuditManager" style="width:auto"><option value="">Все менеджеры</option></select></div>' +
+          '<div class="report-section-head"><div><h3>Выбранная неделя</h3><p>План, состоявшиеся выходы и готовность статистики</p></div></div><div class="grid manager-kpis" id="reachAuditWeekKpis"></div>' +
+          '<div class="report-section-head"><div><h3>Итог месяца</h3><p>Собирается из тех же проверяемых строк</p></div></div><div class="grid manager-kpis" id="reachAuditMonthKpis"></div>' +
+          '<div class="report-section-head"><div><h3>Без статистики</h3><p>Конкретные состоявшиеся выходы, по которым факт ещё не внесён</p></div></div><div class="table-wrap"><table style="min-width:1100px"><thead><tr><th>ID размещения</th><th>Блогер</th><th>Дата</th><th>Формат</th><th>Проект</th><th>Ответственный</th><th>Гарант</th><th>Статус</th></tr></thead><tbody id="reachAuditMissingTable"></tbody></table></div>' +
+          '<details style="margin-top:14px" open><summary><b>Расшифровка до исходных строк</b></summary><div class="table-wrap" style="margin-top:10px"><table style="min-width:1450px"><thead><tr><th>ID размещения</th><th>Блогер</th><th>Дата</th><th>Формат</th><th>Проект</th><th>Ответственный</th><th>Гарант</th><th>Факт</th><th>Статус</th><th>ID отчёта</th></tr></thead><tbody id="reachAuditBreakdownTable"></tbody></table></div></details>' +
+          '<details style="margin-top:14px"><summary><b>Непривязанные и неоднозначные отчёты</b></summary><div class="table-wrap" style="margin-top:10px"><table style="min-width:1000px"><thead><tr><th>ID отчёта</th><th>Блогер</th><th>Дата отчёта</th><th>Факт</th><th>Статус</th><th>Найдено размещений</th></tr></thead><tbody id="reachAuditUnlinkedTable"></tbody></table></div></details>' +
+          '<details style="margin-top:14px"><summary><b>Кандидаты на задвоение</b></summary><div class="table-wrap" style="margin-top:10px"><table style="min-width:1120px"><thead><tr><th>ID размещения</th><th>Блогер</th><th>Дата</th><th>Формат</th><th>Проект</th><th>Факт</th><th>Скриншоты</th><th>Причина проверки</th></tr></thead><tbody id="reachAuditDuplicatesTable"></tbody></table></div></details>' +
+          '<div class="table-note" id="reachAuditSourceNote"></div>';
+        toolbar.insertAdjacentElement("afterend",panel);
+        ["reachAuditMonth","reachAuditWeek","reachAuditProject","reachAuditManager"].forEach(function (id) { document.getElementById(id).addEventListener("change",renderReachAuditAnalytics); });
+        var table = document.getElementById("evidenceTable");
+        var head = table && table.closest("table") && table.closest("table").querySelector("thead tr");
+        if (head) head.innerHTML = '<th>Блогер</th><th>Дата выхода</th><th>Связанные размещения</th><th>Фактический охват</th><th>Клики</th><th>Фото статистики</th><th>Добавил</th><th>Статус</th>';
+      }
+      function ensureEvidencePlacementUi() {
+        if (document.getElementById("evidencePlacementKeys")) return;
+        var date = document.getElementById("evidenceDate");
+        if (!date || !date.parentElement) return;
+        var field = document.createElement("div");
+        field.className = "field field-wide";
+        field.innerHTML = '<label>Конкретное размещение</label><select class="select" id="evidencePlacementKeys" multiple size="5" required></select><span id="evidencePlacementMeta" style="font-size:10px;color:var(--muted)">Сначала выберите блогера и дату выхода</span>';
+        date.parentElement.insertAdjacentElement("afterend",field);
+        date.addEventListener("change",updateEvidencePlacementChoices);
+      }
+      function renderReachAuditAnalytics() {
+        ensureReachAuditUi();
+        var panel = document.getElementById("reachAuditPanel");
+        if (!panel) return;
+        var allowed = reachAuditCanView();
+        panel.classList.toggle("hidden",!allowed);
+        if (!allowed) return;
+        var monthInput = document.getElementById("reachAuditMonth");
+        var weekInput = document.getElementById("reachAuditWeek");
+        var projectInput = document.getElementById("reachAuditProject");
+        var managerInput = document.getElementById("reachAuditManager");
+        if (!monthInput.value) monthInput.value = activeMonthKey();
+        if (!weekInput.value) weekInput.value = localTodayIso();
+        var managerNames = activeEmployeeNames();
+        var previousManager = managerInput.value;
+        managerInput.innerHTML = '<option value="">Все менеджеры</option>' + managerNames.map(function (name) { return '<option value="' + safeText(name) + '">' + safeText(name) + '</option>'; }).join("");
+        if (managerNames.indexOf(previousManager) >= 0) managerInput.value = previousManager;
+        var month = monthInput.value;
+        var direction = projectInput.value;
+        var manager = managerInput.value;
+        var bounds = reachAuditWeekBounds(weekInput.value);
+        var monthRows = reachAuditRows({month:month,direction:direction,manager:manager});
+        var weekRows = reachAuditRows({month:month,start:bounds.start,end:bounds.end,direction:direction,manager:manager});
+        function relevantUnlinked(report,start,end) {
+          if (monthFromDateValue(report.date) !== month || (start && report.date < start) || (end && report.date > end) || reachAuditReportPlacementKeys(report).length) return false;
+          var candidates = reachAuditPlacementCandidates(report);
+          if (direction && !candidates.some(function (item) { return placementDirection(item) === direction; })) return false;
+          if (manager && !candidates.some(function (item) { return employeeNameMatches(manager,item.manager); })) return false;
+          return true;
+        }
+        var monthUnlinked = evidenceReports.filter(function (report) { return relevantUnlinked(report,"",""); });
+        var weekUnlinked = evidenceReports.filter(function (report) { return relevantUnlinked(report,bounds.start,bounds.end); });
+        var monthSummary = reachAuditSummary(monthRows);
+        var weekSummary = reachAuditSummary(weekRows);
+        document.getElementById("reachAuditPeriodLabel").textContent = displayIsoDate(bounds.start) + " — " + displayIsoDate(bounds.end);
+        document.getElementById("reachAuditWeekKpis").innerHTML = [
+          reachAuditKpiHtml("Запланировано",number(weekSummary.planned),"размещений за неделю","◷"),
+          reachAuditKpiHtml("Состоялось",number(weekSummary.occurred),"по дате выхода или факту","✓"),
+          reachAuditKpiHtml("Нет факта",number(weekSummary.missing),"ждём статистику","!"),
+          reachAuditKpiHtml("Не проверено",number(weekSummary.unverified),"факт внесён","?"),
+          reachAuditKpiHtml("Внесённый охват",number(weekSummary.reach),"гарант отдельно: " + number(weekSummary.guaranteed),"◉"),
+          reachAuditKpiHtml("Отчёты без связи",number(weekUnlinked.length),"нужно выбрать размещение","↔")
+        ].join("");
+        document.getElementById("reachAuditMonthKpis").innerHTML = [
+          reachAuditKpiHtml("Месяц · выходы",number(monthSummary.occurred),"из " + number(monthSummary.planned) + " запланированных","Σ"),
+          reachAuditKpiHtml("Месяц · нет факта",number(monthSummary.missing),"размещений без статистики","!"),
+          reachAuditKpiHtml("Месяц · не проверено",number(monthSummary.unverified),"факт требует проверки","?"),
+          reachAuditKpiHtml("Месяц · факт",number(monthSummary.reach),"только внесённый охват","◉"),
+          reachAuditKpiHtml("Месяц · гарант",number(monthSummary.guaranteed),"план, не входит в факт","◎"),
+          reachAuditKpiHtml("Месяц · без связи",number(monthUnlinked.length),"отчётов требуют привязки","↔")
+        ].join("");
+        var missing = weekRows.filter(function (row) { return row.occurred && row.factReach <= 0; });
+        document.getElementById("reachAuditMissingTable").innerHTML = missing.map(function (row) {
+          return '<tr><td><b>#' + safeText(row.placementId) + '</b></td><td>' + safeText(row.blogger) + '</td><td>' + displayIsoDate(row.date) + '</td><td>' + safeText(row.format) + '</td><td>' + safeText(row.project) + '</td><td>' + safeText(row.manager) + '</td><td><b>' + number(row.guarantee) + '</b></td><td><span class="badge badge-amber">Ждём статистику</span></td></tr>';
+        }).join("") || '<tr><td colspan="8"><div class="empty-state">За выбранную неделю нет состоявшихся выходов без статистики.</div></td></tr>';
+        document.getElementById("reachAuditBreakdownTable").innerHTML = weekRows.map(function (row) {
+          var reportIds = row.reports.length ? row.reports.map(function (report) { return safeText(report.id) + " · " + safeText(report.status || "Подтверждено"); }).join("<br>") : "—";
+          var statusClass = row.status === "Факт проверен" ? "badge-green" : row.status === "Ждём статистику" ? "badge-red" : "badge-amber";
+          return '<tr><td><b>#' + safeText(row.placementId) + '</b></td><td>' + safeText(row.blogger) + '</td><td>' + displayIsoDate(row.date) + '</td><td>' + safeText(row.format) + '</td><td>' + safeText(row.project) + '</td><td>' + safeText(row.manager) + '</td><td>' + number(row.guarantee) + '</td><td><b>' + (row.factReach > 0 ? number(row.factReach) : "—") + '</b></td><td><span class="badge ' + statusClass + '">' + safeText(row.status) + '</span></td><td><small>' + reportIds + '</small></td></tr>';
+        }).join("") || '<tr><td colspan="10"><div class="empty-state">За выбранную неделю размещений нет.</div></td></tr>';
+        document.getElementById("reachAuditUnlinkedTable").innerHTML = monthUnlinked.map(function (report) {
+          var candidates = reachAuditPlacementCandidates(report);
+          return '<tr><td><small>' + safeText(report.id) + '</small></td><td><b>' + safeText(report.blogger) + '</b></td><td>' + displayIsoDate(report.date) + '</td><td>' + number(report.reach || 0) + '</td><td>' + safeText(report.status || "Подтверждено") + '</td><td><span class="badge ' + (candidates.length === 1 ? "badge-green" : candidates.length ? "badge-amber" : "badge-red") + '">' + candidates.length + '</span></td></tr>';
+        }).join("") || '<tr><td colspan="6"><div class="empty-state">Все отчёты месяца связаны с размещениями.</div></td></tr>';
+        var duplicates = reachAuditDuplicateCandidates(monthRows);
+        document.getElementById("reachAuditDuplicatesTable").innerHTML = duplicates.map(function (item) {
+          var row = item.row;
+          var screenshots = row.reports.reduce(function (sum,report) { return sum + (report.images || []).length; },0);
+          return '<tr><td><b>#' + safeText(row.placementId) + '</b></td><td>' + safeText(row.blogger) + '</td><td>' + displayIsoDate(row.date) + '</td><td>' + safeText(row.format) + '</td><td>' + safeText(row.project) + '</td><td>' + (row.factReach ? number(row.factReach) : "—") + '</td><td>' + screenshots + '</td><td><span class="badge badge-amber">' + safeText(item.reason) + '</span></td></tr>';
+        }).join("") || '<tr><td colspan="8"><div class="empty-state">Явных кандидатов на задвоение за выбранный месяц нет.</div></td></tr>';
+        document.getElementById("reachAuditSourceNote").textContent = "Неделя: " + weekRows.length + " исходных размещений. Месяц: " + monthRows.length + " исходных размещений. Каждая сумма собирается из строк расшифровки; гарант учитывается только как план.";
       }
       function renderEvidencePreview() {
         document.getElementById("evidencePreview").innerHTML = pendingEvidenceImages.map(function (item, index) {
@@ -4268,7 +4533,32 @@
         var selected = exact || (matches.length === 1 ? matches[0] : null);
         select.value = selected ? selected.value : "";
         meta.textContent = selected ? "Выбран: " + selected.value : matches.length ? "Найдено: " + matches.length + " · уточните запрос" : "Блогер не найден";
+        updateEvidencePlacementChoices();
         return selected;
+      }
+      function updateEvidencePlacementChoices() {
+        ensureEvidencePlacementUi();
+        var select = document.getElementById("evidencePlacementKeys");
+        if (!select) return;
+        var blogger = document.getElementById("evidenceBlogger").value;
+        var date = document.getElementById("evidenceDate").value;
+        var identity = normalizeBloggerIdentity(blogger);
+        var previous = Array.from(select.selectedOptions || []).map(function (option) { return option.value; });
+        var candidates = synchronizedPlacementRecords().filter(function (item) {
+          return normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) === identity && (!date || placementIsoDate(item) === date);
+        });
+        select.innerHTML = candidates.map(function (item) {
+          var key = reachAuditPlacementKey(item);
+          return '<option value="' + safeText(key) + '" data-project="' + safeText(placementDirection(item)) + '" data-format="' + safeText(item.type || "") + '">#' + safeText(item.id) + ' · ' + displayIsoDate(placementIsoDate(item)) + ' · ' + safeText(placementDirection(item)) + ' · ' + safeText(item.type || "формат") + ' · гарант ' + number(item.guaranteed || 0) + '</option>';
+        }).join("");
+        Array.from(select.options).forEach(function (option) { option.selected = previous.indexOf(option.value) >= 0; });
+        if (candidates.length === 1) select.options[0].selected = true;
+        var projectOptions = {};
+        Array.from(select.options).forEach(function (option) { (projectOptions[option.dataset.project] || (projectOptions[option.dataset.project] = [])).push(option); });
+        if (Object.keys(projectOptions).length > 1 && Object.keys(projectOptions).every(function (project) { return projectOptions[project].length === 1; })) {
+          Object.keys(projectOptions).forEach(function (project) { projectOptions[project][0].selected = true; });
+        }
+        document.getElementById("evidencePlacementMeta").textContent = candidates.length ? "Найдено размещений: " + candidates.length + ". Выберите конкретный выход; для разных реальных интеграций можно выбрать несколько." : "На выбранную дату размещение не найдено";
       }
       function populateEvidenceBloggers(selected) {
         var candidates = evidenceBloggerCandidates(selected);
@@ -4279,6 +4569,7 @@
       }
       function openEvidenceForm(blogger) {
         if (role === "analyst") return showToast("У аналитика доступ только на просмотр");
+        ensureEvidencePlacementUi();
         document.getElementById("evidenceForm").reset();
         document.getElementById("evidenceDate").value = localTodayIso();
         populateEvidenceBloggers(blogger || "");
@@ -5479,6 +5770,9 @@
         updateEvidenceBloggerSearch();
         var evidenceBlogger = document.getElementById("evidenceBlogger").value;
         if (!evidenceBlogger) return showToast("Найдите и выберите одного блогера");
+        var placementSelect = document.getElementById("evidencePlacementKeys");
+        var placementLinks = Array.from(placementSelect && placementSelect.selectedOptions || []).map(function (option) { return {placementKey:option.value,project:option.dataset.project || "",format:option.dataset.format || ""}; });
+        if (!placementLinks.length) return showToast("Выберите конкретное размещение для этого отчёта");
         if (!pendingEvidenceImages.length) return showToast("Прикрепите хотя бы одно фото статистики");
         var saveButton = document.getElementById("saveEvidenceBtn");
         var previousLabel = saveButton.textContent;
@@ -5489,6 +5783,7 @@
         form.append("reach",document.getElementById("evidenceReach").value || "0");
         form.append("clicks",document.getElementById("evidenceClicks").value || "0");
         form.append("comment",document.getElementById("evidenceComment").value || "Фото статистики от блогера");
+        form.append("placementLinks",JSON.stringify(placementLinks));
         pendingEvidenceImages.forEach(function (item) { form.append("files",item.file,item.name || item.file.name || "screenshot.jpg"); });
         saveButton.disabled = true;
         saveButton.textContent = "Сохраняю " + pendingEvidenceImages.length + " фото…";
@@ -5510,12 +5805,35 @@
       document.getElementById("evidenceTable").addEventListener("click", function (event) {
         var button = event.target.closest("[data-view-evidence]");
         if (button) openEvidenceViewer(button.dataset.viewEvidence);
+        var linkButton = event.target.closest("[data-link-evidence]");
         var confirmButton = event.target.closest("[data-confirm-evidence]");
         var returnButton = event.target.closest("[data-return-evidence]");
-        if (!confirmButton && !returnButton) return;
-        var id = (confirmButton || returnButton).dataset.confirmEvidence || (confirmButton || returnButton).dataset.returnEvidence;
+        if (!linkButton && !confirmButton && !returnButton) return;
+        var id = linkButton ? linkButton.dataset.linkEvidence : (confirmButton || returnButton).dataset.confirmEvidence || (confirmButton || returnButton).dataset.returnEvidence;
         var report = evidenceReports.find(function (item) { return String(item.id) === String(id); });
         if (!report) return;
+        if (linkButton) {
+          var candidates = reachAuditPlacementCandidates(report);
+          if (!candidates.length) return showToast("Для этого блогера и даты размещение не найдено");
+          var list = candidates.map(function (item,index) { return (index+1) + ". #" + item.id + " · " + placementDirection(item) + " · " + (item.type || "формат") + " · гарант " + number(item.guaranteed || 0); }).join("\n");
+          var candidateProjects = {};
+          candidates.forEach(function (item,index) { var project = placementDirection(item); (candidateProjects[project] || (candidateProjects[project] = [])).push(index+1); });
+          var suggested = Object.keys(candidateProjects).length > 1 && Object.keys(candidateProjects).every(function (project) { return candidateProjects[project].length === 1; }) ? Object.keys(candidateProjects).map(function (project) { return candidateProjects[project][0]; }).join(",") : candidates.length === 1 ? "1" : "";
+          var enteredLinks = window.prompt("Выберите номера размещений через запятую:\n" + list,suggested);
+          if (enteredLinks == null) return;
+          var indexes = String(enteredLinks).split(",").map(function (value) { return Number(value.trim())-1; }).filter(function (value,index,array) { return Number.isInteger(value) && value >= 0 && value < candidates.length && array.indexOf(value) === index; });
+          if (!indexes.length) return showToast("Не выбрано ни одного размещения");
+          var links = indexes.map(function (index) { var item = candidates[index]; return {placementKey:reachAuditPlacementKey(item),project:placementDirection(item),format:item.type || ""}; });
+          apiFetch("/api/evidence-reports",{method:"PATCH",headers:{"content-type":"application/json","x-nsl-role":role},body:JSON.stringify({id:id,status:report.status || "На проверке",reach:Number(report.reach || 0),placementLinks:links})}).then(function (response) {
+            if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось привязать отчёт"); });
+            return response.json();
+          }).then(function (data) {
+            evidenceReports = evidenceReports.map(function (item) { return String(item.id) === String(id) ? data.report : item; });
+            refreshAllDerivedViews();
+            showToast("Отчёт связан с размещением");
+          }).catch(function (error) { showToast(error && error.message ? error.message : "Не удалось привязать отчёт"); });
+          return;
+        }
         var status = returnButton ? "Требует уточнения" : "Подтверждено";
         var reach = Number(report.reach || 0);
         if (confirmButton) {
