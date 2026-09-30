@@ -51,7 +51,7 @@
         selectMonth("placementMonthFilter",month);
         selectMonth("exitMonthFilter",month);
       },50);
-    });
+    },true);
   }
 
   if (document.readyState === "loading") {
