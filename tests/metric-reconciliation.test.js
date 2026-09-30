@@ -162,36 +162,62 @@ test("KPI groups duplicate blogger cards before counting the first confirmed exi
   assert.equal(duplicate.createdByRole,"manager");
 });
 
-test("one blogger and date count as one exit while distinct formats add reach",() => {
+test("monthly fact delegates to auditable placement rows without adding guarantees",() => {
+  const expected = {direction:"ЛН",exits:4,guaranteed:330,reach:340,clicks:25,leads:7,sales:2,revenue:1050,costs:270,source:"Проверяемые строки размещений и связанные отчёты",bloggers:2};
+  const context = {Object,Number,String,Math,reachAuditFact:(month,options) => {
+    assert.equal(month,"2026-08");
+    assert.equal(options.direction,"ЛН");
+    return expected;
+  }};
+  const summarize = runFunction("canonicalMonthlyExitFact",context);
+  assert.deepEqual(summarize("2026-08",{direction:"ЛН"}),expected);
+});
+
+test("reach audit keeps every placement row and separates guarantee from entered fact",() => {
+  const context = {Object,Number};
+  const summarize = runFunction("reachAuditSummary",context);
+  const result = summarize([
+    {occurred:true,factReach:100,verifiedReach:100,verifiedReports:[{}],isVerified:true,guarantee:80,identity:"same",placementId:"1"},
+    {occurred:true,factReach:120,verifiedReach:0,verifiedReports:[],isVerified:false,guarantee:100,identity:"same",placementId:"2"},
+    {occurred:true,factReach:0,verifiedReach:0,verifiedReports:[],isVerified:false,guarantee:90,identity:"same",placementId:"3"},
+  ]);
+  assert.equal(result.planned,3);
+  assert.equal(result.occurred,3);
+  assert.equal(result.missing,1);
+  assert.equal(result.unverified,1);
+  assert.equal(result.verified,1);
+  assert.equal(result.guaranteed,270);
+  assert.equal(result.reach,220);
+  assert.equal(result.verifiedReach,100);
+});
+
+test("evidence confirmation CORS and placement links are enabled",() => {
+  assert.match(apiSource,/access-control-allow-methods[^\n]+PATCH/);
+  assert.match(apiSource,/blogger_evidence_placement_links/);
+  assert.match(source,/synchronizedPlacementCache = distinctPlacementRowsById\(additions\.concat\(rows\)\)/);
+  assert.match(source,/Выберите конкретное размещение для этого отчёта/);
+});
+
+test("one reach report applies to one exact placement in every matching project",() => {
   const placements = [
-    {id:1,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:100,guaranteed:80,clicks:8,leads:3,sales:1,revenue:500,cost:100},
-    {id:2,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:120,guaranteed:100,clicks:10,leads:2,sales:1,revenue:400,cost:100},
-    {id:3,sourceKey:"blogger",sortDate:"2026-08-10",direction:"ЛН",manager:"Менеджер",type:"Reels",actual:50,guaranteed:90,clicks:4,leads:1,sales:0,revenue:100,cost:50},
-    {id:4,sourceKey:"second",sortDate:"2026-08-11",direction:"ЛН",manager:"Менеджер",type:"Stories",actual:70,guaranteed:60,clicks:3,leads:1,sales:0,revenue:50,cost:20},
+    {id:"ln-1",project:"ЛН"},
+    {id:"fit-1",project:"FIT PRO"},
   ];
   const context = {
-    Object,Number,String,Math,
-    MAX_REACH_PER_FORMAT:100000000,MAX_BLOGGER_REACH:1000000000,
-    synchronizedPlacementRecords:() => placements,
-    placementCountsAsExit:() => true,
-    placementIsoDate:item => item.sortDate,
-    monthFromDateValue:value => String(value || "").slice(0,7),
-    placementDirection:item => item.direction,
-    employeeNameMatches:(expected,actual) => expected === actual,
-    normalizeBloggerIdentity:value => String(value || "").toLowerCase(),
-    effectivePlacementActual:item => item.actual,
-    effectivePlacementClicks:item => item.clicks,
-    linkedBloggerForPlacement:() => null,
-    ensureBloggerLookupIndex:() => ({byIdentity:{blogger:[{brand:"ЛН",manager:"Менеджер"}]}}),
-    reelRecords:[],
-    evidenceReports:[{blogger:"blogger",date:"2026-08-10",reach:200,clicks:12,status:"Подтверждено"}],
-    bloggers:[],
+    Array,Object,String,
+    reachAuditPlacementCandidates:() => placements,
+    reachAuditPlacementKey:item => `placement:${item.id}`,
+    placementDirection:item => item.project,
   };
-  const summarize = runFunction("canonicalMonthlyExitFact",context);
-  const result = summarize("2026-08",{direction:"ЛН"});
-  assert.deepEqual(JSON.parse(JSON.stringify(result)),{
-    direction:"ЛН",exits:2,guaranteed:160,reach:270,clicks:15,leads:4,sales:1,revenue:550,costs:170,source:"Уникальные выходы и подтверждённые отчёты",bloggers:2,
-  });
+  vm.createContext(context);
+  vm.runInContext(extractFunction("reachAuditReportPlacementKeys"),context);
+  assert.deepEqual(Array.from(context.reachAuditReportPlacementKeys({blogger:"@any_blogger"})),[
+    "placement:ln-1",
+    "placement:fit-1",
+  ]);
+  placements.push({id:"ln-2",project:"ЛН"});
+  assert.deepEqual(Array.from(context.reachAuditReportPlacementKeys({blogger:"@any_blogger"})),[]);
+  assert.doesNotMatch(extractFunction("reachAuditReportPlacementKeys"),/fitby_zlata/);
 });
 
 test("finance uses the two project sheets for clicks, costs and ROI",() => {
@@ -571,8 +597,8 @@ test("guaranteed reach on dashboard is the exact sum of canonical exit rows",() 
   context.applyOfficialDirectionMetrics = item => item;
   const managerFact = runFunction("monthlyManagerFact",context);
   const directionFact = runFunction("monthlyDirectionFact",context);
-  assert.equal(managerFact("Manager A","2026-08").guaranteed,560000);
-  assert.equal(directionFact("2026-08","ЛН").guaranteed,560000);
+  assert.equal(managerFact("Manager A","2026-08").guaranteed,11350);
+  assert.equal(directionFact("2026-08","ЛН").guaranteed,11350);
 });
 
 test("all roles hydrate official Google Sheets metrics",() => {
