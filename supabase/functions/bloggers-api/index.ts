@@ -24,7 +24,7 @@ function corsHeaders(request: Request) {
     "access-control-allow-headers": "authorization, apikey, cache-control, content-type, x-client-info, x-nsl-role",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
-    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "access-control-expose-headers": "content-disposition, content-type, content-length",
     "access-control-max-age": "86400",
     vary: "Origin",
@@ -130,8 +130,27 @@ async function signedEvidenceReports(admin: any, rows: any[]) {
       const { data } = await admin.storage.from(bucketId).createSignedUrls(paths, 600);
       urls = (data || []).map((item: any) => item.signedUrl).filter(Boolean);
     }
-    return { id: row.id, blogger: row.blogger, date: row.exit_date, reach: Number(row.reach || 0), clicks: Number(row.clicks || 0), uploader: row.uploader, status: row.status || "Подтверждено", comment: row.comment || "", createdAt: row.created_at, images: urls };
+    const links = Array.isArray(row.blogger_evidence_placement_links) ? row.blogger_evidence_placement_links : [];
+    return { id: row.id, blogger: row.blogger, date: row.exit_date, reach: Number(row.reach || 0), clicks: Number(row.clicks || 0), uploader: row.uploader, status: row.status || "Подтверждено", comment: row.comment || "", createdAt: row.created_at, images: urls, placementKeys: links.map((link: any) => String(link.placement_key || "")).filter(Boolean), placementLinks: links.map((link: any) => ({ placementKey: String(link.placement_key || ""), project: String(link.project || ""), format: String(link.format || "") })).filter((link: any) => link.placementKey) };
   }));
+}
+
+function evidencePlacementLinks(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.map((item: any) => ({
+    placementKey: String(item?.placementKey || item || "").trim().slice(0, 900),
+    project: String(item?.project || "").trim().slice(0, 40),
+    format: String(item?.format || "").trim().slice(0, 120),
+  })).filter((item) => item.placementKey && !seen.has(item.placementKey) && seen.add(item.placementKey)).slice(0, 20);
+}
+
+async function replaceEvidencePlacementLinks(admin: any, reportId: string, links: any[], userId: string) {
+  const { error: deleteError } = await admin.from("blogger_evidence_placement_links").delete().eq("report_id", reportId);
+  if (deleteError) throw deleteError;
+  if (!links.length) return;
+  const { error: insertError } = await admin.from("blogger_evidence_placement_links").insert(links.map((link: any) => ({ report_id: reportId, placement_key: link.placementKey, project: link.project, format: link.format, linked_by: userId })));
+  if (insertError) throw insertError;
 }
 
 function parseCsv(text: string) {
@@ -721,19 +740,25 @@ Deno.serve(async (request: Request) => {
 
   if (path === "/api/evidence-reports") {
     await ensureBucket(admin);
-    if (request.method === "GET") { const { data, error } = await admin.from("blogger_evidence_reports").select("*").order("created_at", { ascending: false }); if (error) return json(request, { error: error.message }, 500); return json(request, { reports: await signedEvidenceReports(admin, data || []) }); }
+    if (request.method === "GET") { const { data, error } = await admin.from("blogger_evidence_reports").select("*,blogger_evidence_placement_links(placement_key,project,format)").order("created_at", { ascending: false }); if (error) return json(request, { error: error.message }, 500); return json(request, { reports: await signedEvidenceReports(admin, data || []) }); }
     if (request.method === "PATCH") {
       if (role !== "leader") return json(request, { error: "Проверять фактические охваты может только администратор" }, 403);
       const body = await request.json().catch(() => null);
       const id = String(body?.id || "");
       const status = String(body?.status || "");
       const reach = Number(body?.reach);
+      const placementLinks = evidencePlacementLinks(body?.placementLinks ?? body?.placementKeys);
       const allowedStatuses = new Set(["На проверке", "Подтверждено", "Требует уточнения"]);
       if (!/^[0-9a-f-]{36}$/i.test(id) || !allowedStatuses.has(status) || !Number.isFinite(reach) || reach < 0 || reach > 100000000) return json(request, { error: "Проверьте статус и факт охвата" }, 400);
       const { data, error } = await admin.from("blogger_evidence_reports").update({ status, reach: Math.round(reach) }).eq("id", id).select("*").maybeSingle();
       if (error) return json(request, { error: error.message }, 500);
       if (!data) return json(request, { error: "Отчёт не найден" }, 404);
-      const [report] = await signedEvidenceReports(admin, [data]);
+      if (body?.placementLinks != null || body?.placementKeys != null) {
+        try { await replaceEvidencePlacementLinks(admin, id, placementLinks, userId); }
+        catch (linkError: any) { return json(request, { error: linkError?.message || "Не удалось связать отчёт с размещением" }, 500); }
+      }
+      const { data: links } = await admin.from("blogger_evidence_placement_links").select("placement_key,project,format").eq("report_id", id);
+      const [report] = await signedEvidenceReports(admin, [{ ...data, blogger_evidence_placement_links: links || [] }]);
       return json(request, { report });
     }
     if (request.method === "POST") {
@@ -746,6 +771,8 @@ Deno.serve(async (request: Request) => {
       const clicks = Number(form.get("clicks") || 0);
       const comment = String(form.get("comment") || "").trim().slice(0, 1500);
       const requestedUploader = String(form.get("uploader") || "").trim().slice(0, 160);
+      let placementLinks: any[] = [];
+      try { placementLinks = evidencePlacementLinks(JSON.parse(String(form.get("placementLinks") || "[]"))); } catch { placementLinks = []; }
       if (!blogger || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(reach) || reach < 0 || !files.length || files.length > 10) return json(request, { error: "Проверьте блогера, дату, охват и фотографии" }, 400);
       let uploader = profile.name || "Сотрудник";
       if (requestedUploader) {
@@ -767,7 +794,11 @@ Deno.serve(async (request: Request) => {
       const row = { id, blogger, exit_date: date, reach: Math.round(reach), clicks: Math.max(0, Math.round(clicks)), uploader, status: role === "leader" ? "Подтверждено" : "На проверке", comment, images_json: images, created_by: userId };
       const { error } = await admin.from("blogger_evidence_reports").insert(row);
       if (error) return json(request, { error: error.message }, 500);
-      const [report] = await signedEvidenceReports(admin, [{ ...row, created_at: new Date().toISOString() }]);
+      if (placementLinks.length) {
+        try { await replaceEvidencePlacementLinks(admin, id, placementLinks, userId); }
+        catch (linkError: any) { await admin.from("blogger_evidence_reports").delete().eq("id", id); return json(request, { error: linkError?.message || "Не удалось связать отчёт с размещением" }, 500); }
+      }
+      const [report] = await signedEvidenceReports(admin, [{ ...row, created_at: new Date().toISOString(), blogger_evidence_placement_links: placementLinks.map((link: any) => ({ placement_key: link.placementKey, project: link.project, format: link.format })) }]);
       return json(request, { report }, 201);
     }
   }
