@@ -834,6 +834,25 @@
           return identity && array.indexOf(identity) === index;
         });
       }
+      function bloggerIdentityDistance(left,right) {
+        left = normalizeBloggerIdentity(left);
+        right = normalizeBloggerIdentity(right);
+        if (left === right) return 0;
+        if (!left || !right) return Math.max(left.length,right.length);
+        var previous = Array.from({length:right.length + 1},function (_,index) { return index; });
+        for (var leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+          var current = [leftIndex];
+          for (var rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+            current[rightIndex] = Math.min(
+              current[rightIndex - 1] + 1,
+              previous[rightIndex] + 1,
+              previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+            );
+          }
+          previous = current;
+        }
+        return previous[right.length];
+      }
       function groupedKpiBloggers() {
         var groups = [];
         bloggers.forEach(function (blogger) {
@@ -4504,21 +4523,30 @@
       }
       function evidenceBloggerCandidates(selected) {
         var records = bloggers.map(function (blogger) {
-          return {
-            value:blogger.name || blogger.display,
-            search:[blogger.name,blogger.display,blogger.link,blogger.sourceKey].join(" ").toLowerCase()
-          };
+          return {value:blogger.name || blogger.display,aliases:bloggerIdentityAliases(blogger),search:[blogger.name,blogger.display,blogger.link,blogger.sourceKey].join(" ").toLowerCase()};
         });
-        ["@fit_with_anna","@alexey_vlasov"].forEach(function (name) { records.push({value:name,search:name.toLowerCase()}); });
-        if (selected && !records.some(function (item) { return item.value === selected; })) records.unshift({value:selected,search:String(selected).toLowerCase()});
-        return records.filter(function (item,index,array) { return item.value && array.findIndex(function (candidate) { return candidate.value === item.value; }) === index; });
+        synchronizedPlacementRecords().forEach(function (item) {
+          records.push({value:item.tag || item.fullName,aliases:[item.tag,item.fullName,item.bloggerLink,item.platform,item.sourceKey].map(normalizeBloggerIdentity).filter(Boolean),search:[item.tag,item.fullName,item.bloggerLink,item.platform,item.sourceKey].join(" ").toLowerCase()});
+        });
+        evidenceReports.forEach(function (report) { records.push({value:report.blogger,aliases:[normalizeBloggerIdentity(report.blogger)].filter(Boolean),search:String(report.blogger || "").toLowerCase()}); });
+        ["@fit_with_anna","@alexey_vlasov"].forEach(function (name) { records.push({value:name,aliases:[normalizeBloggerIdentity(name)],search:name.toLowerCase()}); });
+        if (selected) records.unshift({value:selected,aliases:[normalizeBloggerIdentity(selected)].filter(Boolean),search:String(selected).toLowerCase()});
+        var groups = [];
+        records.filter(function (item) { return item.value; }).forEach(function (item) {
+          item.aliases = (item.aliases || []).filter(function (alias,index,array) { return alias && array.indexOf(alias) === index; });
+          var existing = groups.find(function (candidate) { return item.aliases.some(function (alias) { return candidate.aliases.indexOf(alias) >= 0; }); });
+          if (!existing) return groups.push({value:item.value,aliases:item.aliases.slice(),search:item.search});
+          item.aliases.forEach(function (alias) { if (existing.aliases.indexOf(alias) < 0) existing.aliases.push(alias); });
+          existing.search += " " + item.search;
+        });
+        return groups;
       }
       function updateEvidenceBloggerSearch() {
         var input = document.getElementById("evidenceBloggerSearch");
         var select = document.getElementById("evidenceBlogger");
         var meta = document.getElementById("evidenceBloggerSearchMeta");
         var query = String(input.value || "").trim().toLowerCase();
-        var normalized = query.replace(/^@/,"");
+        var normalized = normalizeBloggerIdentity(query);
         if (!query) {
           select.value = "";
           meta.textContent = "Начните вводить имя блогера";
@@ -4529,10 +4557,19 @@
           var text = item.search;
           return text.indexOf(query) >= 0 || (normalized && text.replace(/@/g,"").indexOf(normalized) >= 0);
         });
-        var exact = matches.find(function (item) { return String(item.value).toLowerCase().replace(/^@/,"") === normalized; });
+        var exact = matches.find(function (item) { return item.aliases.indexOf(normalized) >= 0; });
+        var corrected = false;
+        if (!exact && normalized.length >= 5) {
+          var fuzzy = candidates.map(function (item) {
+            return {item:item,distance:item.aliases.reduce(function (best,alias) { return Math.min(best,bloggerIdentityDistance(normalized,alias)); },Number.MAX_SAFE_INTEGER)};
+          }).filter(function (item) { return item.distance <= 1; });
+          var bestDistance = fuzzy.reduce(function (best,item) { return Math.min(best,item.distance); },Number.MAX_SAFE_INTEGER);
+          var bestMatches = fuzzy.filter(function (item) { return item.distance === bestDistance; });
+          if (bestMatches.length === 1) { exact = bestMatches[0].item; corrected = true; }
+        }
         var selected = exact || (matches.length === 1 ? matches[0] : null);
         select.value = selected ? selected.value : "";
-        meta.textContent = selected ? "Выбран: " + selected.value : matches.length ? "Найдено: " + matches.length + " · уточните запрос" : "Блогер не найден";
+        meta.textContent = selected ? "Выбран: " + selected.value + (corrected ? " · исправлена опечатка" : "") : matches.length ? "Найдено: " + matches.length + " · уточните запрос" : "Блогер не найден";
         updateEvidencePlacementChoices();
         return selected;
       }
@@ -4558,7 +4595,7 @@
         if (Object.keys(projectOptions).length > 1 && Object.keys(projectOptions).every(function (project) { return projectOptions[project].length === 1; })) {
           Object.keys(projectOptions).forEach(function (project) { projectOptions[project][0].selected = true; });
         }
-        document.getElementById("evidencePlacementMeta").textContent = candidates.length ? "Найдено размещений: " + candidates.length + ". Выберите конкретный выход; для разных реальных интеграций можно выбрать несколько." : "На выбранную дату размещение не найдено";
+        document.getElementById("evidencePlacementMeta").textContent = candidates.length ? "Найдено размещений: " + candidates.length + ". Выберите конкретный выход; для разных реальных интеграций можно выбрать несколько." : "На выбранную дату размещение не найдено. Отчёт сохранится без связи и попадёт администратору на привязку.";
       }
       function populateEvidenceBloggers(selected) {
         var candidates = evidenceBloggerCandidates(selected);
@@ -5772,7 +5809,7 @@
         if (!evidenceBlogger) return showToast("Найдите и выберите одного блогера");
         var placementSelect = document.getElementById("evidencePlacementKeys");
         var placementLinks = Array.from(placementSelect && placementSelect.selectedOptions || []).map(function (option) { return {placementKey:option.value,project:option.dataset.project || "",format:option.dataset.format || ""}; });
-        if (!placementLinks.length) return showToast("Выберите конкретное размещение для этого отчёта");
+        if (!placementLinks.length && placementSelect && placementSelect.options.length) return showToast("Выберите конкретное размещение для этого отчёта");
         if (!pendingEvidenceImages.length) return showToast("Прикрепите хотя бы одно фото статистики");
         var saveButton = document.getElementById("saveEvidenceBtn");
         var previousLabel = saveButton.textContent;
@@ -5797,7 +5834,7 @@
           saveData();
           releasePendingEvidenceImages(); pendingEvidenceImages = [];
           refreshAllDerivedViews();
-          closeLayers(); navigate("reports"); showToast("Сохранено фотографий: " + record.images.length);
+          closeLayers(); navigate("reports"); showToast("Сохранено фотографий: " + record.images.length + (placementLinks.length ? "" : " · отчёт ожидает привязки"));
         }).catch(function (error) {
           showToast(error && error.message ? error.message : "Не удалось сохранить фотографии");
         }).finally(function () { saveButton.disabled = false; saveButton.textContent = previousLabel; });
