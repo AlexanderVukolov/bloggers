@@ -1736,9 +1736,9 @@
       }
       function activeMonthKey() {
         var active = activeOperationalMonth();
-        if (active) return active.month;
-        var latest = departmentMonths.slice().sort(function (a,b) { return String(b.month).localeCompare(String(a.month)); })[0];
         var current = systemMonthKey();
+        if (active && active.month >= current) return active.month;
+        var latest = departmentMonths.slice().sort(function (a,b) { return String(b.month).localeCompare(String(a.month)); })[0];
         return latest && latest.month > current ? latest.month : current;
       }
       function activeMonthLabel(month) {
@@ -1752,7 +1752,7 @@
         return date.getFullYear() + "-" + String(date.getMonth()+1).padStart(2,"0");
       }
       function allDepartmentMonthKeys() {
-        var keys = departmentMonths.map(function (item) { return item.month; });
+        var keys = [systemMonthKey()].concat(departmentMonths.map(function (item) { return item.month; }));
         synchronizedPlacementRecords().forEach(function (item) {
           [item.sortDate || item.start,item.warmupStart,item.warmupEnd].forEach(function (dateValue) { var value = monthFromDateValue(dateValue); if (value) keys.push(value); });
         });
@@ -1771,7 +1771,7 @@
           var previous = select.value;
           var wasReady = select.dataset.monthReady === "true";
           select.innerHTML = '<option value="">Все месяцы</option>' + months.map(function (value) { return '<option value="' + value + '">' + activeMonthLabel(value) + '</option>'; }).join("");
-          var target = forceMonth || (wasReady ? previous : fallback);
+          var target = id === "bloggerMonthFilter" ? (wasReady ? previous : "") : forceMonth || (wasReady ? previous : fallback);
           select.value = months.indexOf(target) >= 0 ? target : "";
           select.dataset.monthReady = "true";
         });
@@ -5007,7 +5007,9 @@
         }
         syncBloggerEditControls();
         var canEdit = role !== "analyst";
-        document.querySelectorAll(".add-blogger-btn,#quickAddBtn,#addPlacementBtn,#calendarAddBtn,#createPlacementFromBloggerBtn,#fillReportBtn,#fillAssistantReportBtn,#addEvidenceBtn,.evidence-add-btn").forEach(function (el) { el.classList.toggle("hidden", !canEdit); });
+        document.querySelectorAll(".add-blogger-btn,#quickAddBtn,#addPlacementBtn,#calendarAddBtn,#createPlacementFromBloggerBtn,#addEvidenceBtn,.evidence-add-btn").forEach(function (el) { el.classList.toggle("hidden", !canEdit); });
+        document.getElementById("fillReportBtn").classList.toggle("hidden",role !== "leader" && role !== "manager");
+        document.getElementById("fillAssistantReportBtn").classList.toggle("hidden",role !== "leader" && role !== "assistant");
         if (role === "manager") {
           document.getElementById("managerMetricsFilter").value = activeEmployeeManagers()[0] || "all";
           renderManagerMetrics();
@@ -5166,7 +5168,7 @@
       ["bloggerSearch","bloggerMonthFilter","statusFilter","managerFilter","brandFilter","categoryFilter","bloggerPlatformFilter","bloggerContractFilter","bloggerReachMin","bloggerReachMax","bloggerLeadsMin","bloggerSalesMin","bloggerRevenueMin","bloggerLastFrom","bloggerLastTo","bloggerSortFilter"].forEach(function (id) { document.getElementById(id).addEventListener("input", renderBloggers); });
       document.getElementById("resetBloggerFilters").addEventListener("click",function () {
         ["bloggerSearch","statusFilter","managerFilter","brandFilter","categoryFilter","bloggerPlatformFilter","bloggerContractFilter","bloggerReachMin","bloggerReachMax","bloggerLeadsMin","bloggerSalesMin","bloggerRevenueMin","bloggerLastFrom","bloggerLastTo"].forEach(function (id) { document.getElementById(id).value = ""; });
-        document.getElementById("bloggerMonthFilter").value = activeMonthKey();
+        document.getElementById("bloggerMonthFilter").value = "";
         document.getElementById("bloggerSortFilter").value = "created-desc";
         renderBloggers(); showToast("Все фильтры блогеров сброшены");
       });
@@ -5207,7 +5209,12 @@
           bloggers = consolidateBloggerCards(bloggers);
           saveData();
           invalidateDerivedData();
+          var createdMonth = monthFromDateValue(newBlogger.createdAt) || systemMonthKey();
+          refreshMonthFilters(createdMonth);
           refreshAllDerivedViews();
+          var bloggerMonthFilter = document.getElementById("bloggerMonthFilter");
+          if (bloggerMonthFilter) bloggerMonthFilter.value = "";
+          renderBloggers();
           refreshBloggerCounters();
           form.reset();
           closeLayers();
@@ -5920,6 +5927,14 @@
       });
       document.getElementById("newPlacementBlogger").addEventListener("change",updatePlacementBloggerPreview);
       document.getElementById("newPlacementBloggerSearch").addEventListener("input",populatePlacementBloggerSelect);
+      document.getElementById("newPlacementDate").addEventListener("change",function () {
+        var date = this.value;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+        var start = document.getElementById("newPlacementWarmupStart");
+        var end = document.getElementById("newPlacementWarmupEnd");
+        if (!start.value || start.value === end.value) start.value = date;
+        if (!end.value || end.value < start.value) end.value = date;
+      });
       document.getElementById("openSelectedBloggerBtn").addEventListener("click",function () {
         var id = document.getElementById("newPlacementBlogger").value;
         if (id) openBlogger(id);
@@ -5932,6 +5947,7 @@
         var isoDate = document.getElementById("newPlacementDate").value;
         var warmupStart = document.getElementById("newPlacementWarmupStart").value;
         var warmupEnd = document.getElementById("newPlacementWarmupEnd").value;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return showToast("Выберите дату выхода");
         if (warmupEnd < warmupStart) return showToast("Дата окончания прогрева не может быть раньше даты старта");
         var parts = isoDate.split("-");
         var displayDate = parts.length === 3 ? parts[2] + "." + parts[1] + "." + parts[0] : isoDate;
@@ -5950,27 +5966,45 @@
         invalidateDerivedData();
         var sharedPlacementSave = persistSharedStateRecords([sharedPlacementRecord(record)]);
         try { sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords)); } catch (cacheError) { console.warn("NSL local placement cache skipped",cacheError); }
-        persistPlacementSchedule(record,warmupStart,warmupEnd).catch(function () { showToast("Размещение создано, но даты прогрева не синхронизировались"); });
         expandedPlacementId = record.id; placementPage = 1; placementQuickFilter = "all";
         document.querySelectorAll("#placementQuickFilters .quick-filter").forEach(function (item) { item.classList.toggle("active",item.dataset.placementQuick === "all"); });
         var destination = placementCreateOrigin === "calendar" ? "calendar" : "placements";
+        var recordMonth = monthFromDateValue(record.sortDate);
+        var submitButton = event.target.querySelector('button[type="submit"]');
+        var submitLabel = submitButton.textContent;
+        submitButton.disabled = true;
+        submitButton.textContent = "Сохраняю…";
         refreshAllDerivedViews();
         if (destination === "calendar") {
-          var recordMonth = monthFromDateValue(record.sortDate);
           var monthFilter = document.getElementById("exitMonthFilter");
           if (monthFilter && recordMonth) monthFilter.value = recordMonth;
           ["exitSearch","exitReachMin","exitReachMax","exitDateFrom","exitDateTo"].forEach(function (id) { var control = document.getElementById(id); if (control) control.value = ""; });
           ["exitManagerFilter","exitFormatFilter","exitActualFilter"].forEach(function (id) { var control = document.getElementById(id); if (control) control.value = ""; });
           exitPage = 1;
+        } else {
+          var placementMonthFilter = document.getElementById("placementMonthFilter");
+          if (placementMonthFilter && recordMonth) placementMonthFilter.value = recordMonth;
         }
-        closeLayers(); event.target.reset(); navigate(destination);
-        showToast((destination === "calendar" ? "Выход добавлен в список для " : "Размещение создано для ") + (blogger.display || blogger.name));
         sharedPlacementSave.then(function () {
-          if (destination === "calendar") showToast("Выход сохранён в общей базе");
+          return persistPlacementSchedule(record,warmupStart,warmupEnd).catch(function () {
+            showToast("Выход сохранён, но даты прогрева нужно повторить");
+          });
+        }).then(function () {
+          closeLayers(); event.target.reset(); navigate(destination);
+          showToast((destination === "calendar" ? "Выход сохранён в общей базе для " : "Размещение сохранено в общей базе для ") + (blogger.display || blogger.name) + (recordMonth ? " · " + activeMonthLabel(recordMonth) : ""));
+          placementCreateOrigin = "placements";
         }).catch(function (error) {
-          showToast(error && error.message ? error.message : "Выход показан локально, но не сохранился в общей базе");
+          customPlacementRecords = customPlacementRecords.filter(function (item) { return String(item.id) !== String(record.id); });
+          placementRecords = placementRecords.filter(function (item) { return String(item.id) !== String(record.id); });
+          weeklyExits = weeklyExits.filter(function (item) { return String(item.sourcePlacementId || "") !== String(record.id); });
+          invalidateDerivedData();
+          try { sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords)); } catch (cacheError) {}
+          refreshAllDerivedViews();
+          showToast(error && error.message ? error.message : "Выход не сохранился в общей базе. Повторите ещё раз");
+        }).finally(function () {
+          submitButton.disabled = false;
+          submitButton.textContent = submitLabel;
         });
-        placementCreateOrigin = "placements";
       });
       document.getElementById("calendarAddBtn").addEventListener("click", function () { openPlacementCreator("calendar"); });
       document.getElementById("inviteBtn").addEventListener("click", function () { openEmployeeEditor(null); });
