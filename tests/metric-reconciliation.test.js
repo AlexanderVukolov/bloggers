@@ -4,7 +4,12 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(require("node:path").join(__dirname,"..","app-bundle-v88.js"),"utf8");
+const bodySource = fs.readFileSync(require("node:path").join(__dirname,"..","body-bundle-v88.js"),"utf8");
 const apiSource = fs.readFileSync(require("node:path").join(__dirname,"..","supabase","functions","bloggers-api","index.ts"),"utf8");
+const index = fs.readFileSync(require("node:path").join(__dirname,"..","index.html"),"utf8");
+const serviceWorker = fs.readFileSync(require("node:path").join(__dirname,"..","sw.js"),"utf8");
+const octoberPatch = fs.readFileSync(require("node:path").join(__dirname,"..","october-exits-v124.js"),"utf8");
+const bloggerBasePatch = fs.readFileSync(require("node:path").join(__dirname,"..","blogger-base-v126.js"),"utf8");
 
 test("existing passwords remain compatible while new invitations require twelve characters",() => {
   assert.match(source,/passwordInput\.minLength = 8/);
@@ -388,14 +393,78 @@ test("assistant outreach in leader profile uses fact field",() => {
   assert.equal(activity.approvals,3);
 });
 
-test("September daily reports wait for shared database confirmation and current month opens automatically",() => {
-  assert.match(apiSource,/const hasActiveMonth = \(data \|\| \[\]\)\.some\(\(row: any\) => row\.status === "active"\)/);
-  assert.match(apiSource,/if \(!hasActiveMonth && !hasCurrentMonth\)/);
+test("daily reports wait for shared database confirmation and the current month rolls over automatically",() => {
+  assert.match(apiSource,/const staleActiveMonths = \(data \|\| \[\]\)\.filter/);
+  assert.match(apiSource,/if \(!hasCurrentMonth\)/);
   assert.match(apiSource,/month_key: currentMonth, status: "active"/);
+  assert.match(apiSource,/status: "archived", closed_at: new Date\(\)\.toISOString\(\)/);
   assert.match(source,/return latest && latest\.month > current \? latest\.month : current/);
   assert.match(source,/persistSharedStateRecords\(\[sharedStateRecord\("manager_report"/);
   assert.match(source,/persistSharedStateRecords\(\[sharedStateRecord\("assistant_report"/);
   assert.match(source,/сохранён в общей базе/);
+});
+
+test("future month exits wait for database save and open the created month",() => {
+  assert.match(source,/var recordMonth = monthFromDateValue\(record\.sortDate\)/);
+  assert.match(source,/placementMonthFilter\.value = recordMonth/);
+  assert.match(source,/monthFilter\.value = recordMonth/);
+  assert.match(source,/sharedPlacementSave\.then\(function \(\) \{\s*return persistPlacementSchedule/);
+  assert.match(source,/Выход сохранён в общей базе для/);
+  assert.match(source,/customPlacementRecords = customPlacementRecords\.filter/);
+});
+
+test("future month compatibility patch keeps filters and warmup dates aligned",() => {
+  assert.match(octoberPatch,/selectMonth\("placementMonthFilter",month\)/);
+  assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
+  assert.match(octoberPatch,/start\.value = date\.value/);
+  assert.match(octoberPatch,/\},true\);/);
+  assert.match(index,/october-exits-v124\.js\?v=126/);
+  assert.match(serviceWorker,/october-exits-v124\.js/);
+});
+
+test("blogger directory opens the full base while placements and exits keep the active month",() => {
+  assert.match(source,/if \(active && active\.month >= current\) return active\.month/);
+  assert.match(source,/var keys = \[systemMonthKey\(\)\]\.concat/);
+  assert.match(source,/refreshMonthFilters\(createdMonth\)/);
+  assert.match(source,/id === "bloggerMonthFilter" \? \(wasReady \? previous : ""\)/);
+  assert.match(source,/bloggerMonthFilter\.value = ""/);
+  assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
+  assert.match(bloggerBasePatch,/event\.isTrusted/);
+  assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
+  assert.match(index,/blogger-base-v126\.js\?v=126/);
+  assert.doesNotMatch(index,/october-bloggers-v125\.js/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v126-full-blogger-base/);
+  assert.match(apiSource,/staleActiveMonths/);
+  assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
+});
+
+test("role actions stay available only to the matching employee role",() => {
+  assert.match(source,/fillReportBtn"\)\.classList\.toggle\("hidden",role !== "leader" && role !== "manager"\)/);
+  assert.match(source,/fillAssistantReportBtn"\)\.classList\.toggle\("hidden",role !== "leader" && role !== "assistant"\)/);
+  assert.match(source,/var canEdit = role !== "analyst"/);
+  assert.match(source,/function canEditActualReach\(\) \{\s*return \["leader","manager","assistant"\]/);
+  assert.match(apiSource,/function writable\(role: string\) \{ return role === "leader" \|\| role === "manager" \|\| role === "assistant"; \}/);
+  assert.match(apiSource,/sharedAdminOnly = new Set/);
+  assert.match(bloggerBasePatch,/function applyRoleActions\(\)/);
+});
+
+test("every permanent button with an id is wired to an action",() => {
+  let html = "";
+  const bodyContext = {document:{body:{set innerHTML(value) { html = value; }}}};
+  vm.createContext(bodyContext);
+  vm.runInContext(bodySource,bodyContext);
+  const buttonIds = Array.from(html.matchAll(/<button\b[^>]*\bid="([^"]+)"[^>]*>/g),match => match[1]);
+  const formSubmitButtons = new Set(["loginSubmitBtn","saveEvidenceBtn","saveEmployeeBtn"]);
+  const groupedButtons = new Set(["quickAddBtn"]);
+  const missing = buttonIds.filter(id => {
+    if (formSubmitButtons.has(id) || groupedButtons.has(id)) return false;
+    return !source.includes('getElementById("' + id + '").addEventListener');
+  });
+  assert.deepEqual(missing,[]);
+  assert.match(source,/document\.querySelectorAll\("\.add-blogger-btn,#quickAddBtn"\)/);
+  assert.match(source,/document\.getElementById\("loginForm"\)\.addEventListener\("submit"/);
+  assert.match(source,/document\.getElementById\("evidenceForm"\)\.addEventListener\("submit"/);
+  assert.match(source,/document\.getElementById\("employeeForm"\)\.addEventListener\("submit"/);
 });
 
 test("outreach summaries calculate replies refusals approvals and response conversion by day and month",() => {
