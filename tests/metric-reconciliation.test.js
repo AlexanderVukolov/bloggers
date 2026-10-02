@@ -9,7 +9,7 @@ const apiSource = fs.readFileSync(require("node:path").join(__dirname,"..","supa
 const index = fs.readFileSync(require("node:path").join(__dirname,"..","index.html"),"utf8");
 const serviceWorker = fs.readFileSync(require("node:path").join(__dirname,"..","sw.js"),"utf8");
 const octoberPatch = fs.readFileSync(require("node:path").join(__dirname,"..","october-exits-v124.js"),"utf8");
-const bloggerBasePatch = fs.readFileSync(require("node:path").join(__dirname,"..","blogger-base-v126.js"),"utf8");
+const bloggerBasePatch = fs.readFileSync(require("node:path").join(__dirname,"..","blogger-base-v127.js"),"utf8");
 
 test("existing passwords remain compatible while new invitations require twelve characters",() => {
   assert.match(source,/passwordInput\.minLength = 8/);
@@ -418,7 +418,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=126/);
+  assert.match(index,/october-exits-v124\.js\?v=127/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -431,11 +431,18 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v126\.js\?v=126/);
+  assert.match(index,/blogger-base-v127\.js\?v=127/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v126-full-blogger-base/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v127-complete-register/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
+});
+
+test("blogger directory preserves every source card while KPI grouping stays separate",() => {
+  assert.match(source,/bloggers = baseBloggers\.map\(function \(item\)/);
+  assert.doesNotMatch(source,/bloggers\s*=\s*consolidateBloggerCards\(/);
+  assert.match(source,/function groupedKpiBloggers\(\)/);
+  assert.match(source,/function consolidateBloggerCards\(items\)/);
 });
 
 test("role actions stay available only to the matching employee role",() => {
@@ -446,6 +453,10 @@ test("role actions stay available only to the matching employee role",() => {
   assert.match(apiSource,/function writable\(role: string\) \{ return role === "leader" \|\| role === "manager" \|\| role === "assistant"; \}/);
   assert.match(apiSource,/sharedAdminOnly = new Set/);
   assert.match(bloggerBasePatch,/function applyRoleActions\(\)/);
+  assert.match(bloggerBasePatch,/var canOperate = role === "leader" \|\| role === "manager" \|\| role === "assistant"/);
+  assert.match(bloggerBasePatch,/button\.disabled = !canOperate/);
+  assert.match(bloggerBasePatch,/managerReport\.disabled = role !== "leader" && role !== "manager"/);
+  assert.match(bloggerBasePatch,/assistantReport\.disabled = role !== "leader" && role !== "assistant"/);
 });
 
 test("every permanent button with an id is wired to an action",() => {
