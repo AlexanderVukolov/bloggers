@@ -230,7 +230,8 @@
         if (b.status === "В пуле") b.status = "Вышел";
         return b;
       });
-      bloggers = consolidateBloggerCards(bloggers);
+      // The directory is an auditable register: never collapse rows here.
+      // Possible duplicate identities are grouped only inside KPI calculations.
       var bloggerEditMode = false;
       var bloggerEditSnapshot = null;
       var filteredBloggerRows = [];
@@ -2258,7 +2259,7 @@
         }
         if (record.namespace === "bootstrap_bloggers" && Array.isArray(value)) {
           baseBloggers = value.map(normalizeBootstrapBlogger);
-          bloggers = consolidateBloggerCards(baseBloggers.map(function (item) { return Object.assign({},item,{platforms:(item.platforms || []).slice(),contractFiles:[]}); }));
+          bloggers = baseBloggers.map(function (item) { return Object.assign({},item,{platforms:(item.platforms || []).slice(),contractFiles:[]}); });
           return;
         }
         if (record.namespace === "bootstrap_placements" && Array.isArray(value)) {
@@ -2366,7 +2367,7 @@
           catch (error) { console.error("NSL derived view failed:",name,error); }
         }
         safely("invalidate",invalidateDerivedData);
-        safely("blogger cards",function () { bloggers = consolidateBloggerCards(bloggers); });
+        safely("blogger cards",function () { bloggers = bloggers.slice(); });
         safely("blogger counters",refreshBloggerCounters);
         safely("local cache",cacheSharedStateLocally);
         safely("imported data",initializeImportedData);
@@ -2413,7 +2414,7 @@
           });
           if (recoveryRecords.length) {
             recoveryRecords.forEach(function (item) { bloggers.unshift(item); });
-            bloggers = consolidateBloggerCards(bloggers);
+            bloggers = bloggers.slice();
             locallyCreatedBloggerRecovery = [];
             persistSharedStateRecords(recoveryRecords.map(sharedNewBloggerRecord)).then(function () {
               saveData(); refreshBloggerCounters();
@@ -5206,7 +5207,7 @@
         showToast("Сохраняю карточку в общей базе…");
         persistSharedStateRecords([sharedNewBloggerRecord(newBlogger)]).then(function () {
           bloggers.unshift(newBlogger);
-          bloggers = consolidateBloggerCards(bloggers);
+          bloggers = bloggers.slice();
           saveData();
           invalidateDerivedData();
           var createdMonth = monthFromDateValue(newBlogger.createdAt) || systemMonthKey();
@@ -6143,6 +6144,6 @@
       window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=117",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=127",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();
