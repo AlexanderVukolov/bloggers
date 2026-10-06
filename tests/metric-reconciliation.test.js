@@ -418,7 +418,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=127/);
+  assert.match(index,/october-exits-v124\.js\?v=128/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -431,9 +431,9 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v127\.js\?v=127/);
+  assert.match(index,/blogger-base-v127\.js\?v=128/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v127-complete-register/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v128-october-sync/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
 });
@@ -457,6 +457,34 @@ test("role actions stay available only to the matching employee role",() => {
   assert.match(bloggerBasePatch,/button\.disabled = !canOperate/);
   assert.match(bloggerBasePatch,/managerReport\.disabled = role !== "leader" && role !== "manager"/);
   assert.match(bloggerBasePatch,/assistantReport\.disabled = role !== "leader" && role !== "assistant"/);
+});
+
+test("shared state loads every database page instead of stopping at the API row cap",() => {
+  assert.match(apiSource,/async function readAllSharedStateRows/);
+  assert.match(apiSource,/const pageSize = 500/);
+  assert.match(apiSource,/\.range\(offset, offset \+ pageSize - 1\)/);
+  assert.match(apiSource,/if \(page\.length < pageSize\) break/);
+  assert.match(apiSource,/await readAllSharedStateRows\(admin, role, since\)/);
+});
+
+test("expired sessions recover once and startup renders are batched",() => {
+  assert.match(source,/response\.status !== 401/);
+  assert.match(source,/supabaseClient\.auth\.refreshSession\(\)/);
+  assert.match(source,/apiSessionRefreshPromise\.then\(request\)/);
+  assert.match(source,/function beginHydrationBatch\(\)/);
+  assert.match(source,/function endHydrationBatch\(\)/);
+  assert.match(source,/Promise\.allSettled\(tasks\)/);
+});
+
+test("blocking mobile layers are cleared and blogger ids remain stable",() => {
+  assert.match(source,/function resetBlockingLayers\(\)/);
+  assert.match(source,/window\.addEventListener\("pageshow",function \(\) \{ resetBlockingLayers\(\)/);
+  assert.match(source,/function sameRecordId\(left,right\)/);
+  assert.match(source,/var b = bloggers\.find\(function \(x\) \{ return sameRecordId\(x\.id,id\); \}\)/);
+});
+
+test("finance hydration is not requested for non-admin roles",() => {
+  assert.match(extractFunction("hydrateFinanceCenter"),/if \(!canRenderFinance\) return Promise\.resolve\(null\)/);
 });
 
 test("every permanent button with an id is wired to an action",() => {

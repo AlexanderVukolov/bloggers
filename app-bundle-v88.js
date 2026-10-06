@@ -164,6 +164,7 @@
       var supabaseClient = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:true}});
       var currentSession = null;
       var sessionActivationPromise = null;
+      var apiSessionRefreshPromise = null;
       var currentUserProfile = null;
       var currentEmployeeProfile = null;
       var employeeProfileTargetId = "";
@@ -183,13 +184,26 @@
         return window.fetch(API_ROOT + path,options);
       }
       function apiFetch(path,init) {
-        var options = Object.assign({},init || {});
-        var headers = new Headers(options.headers || {});
-        headers.set("apikey",SUPABASE_KEY);
-        if (currentSession && currentSession.access_token) headers.set("authorization","Bearer " + currentSession.access_token);
-        else if (adminAccessToken) headers.set("x-nsl-access",adminAccessToken);
-        options.headers = headers;
-        return window.fetch(API_ROOT + path,options);
+        function request() {
+          var options = Object.assign({},init || {});
+          var headers = new Headers(options.headers || {});
+          headers.set("apikey",SUPABASE_KEY);
+          if (currentSession && currentSession.access_token) headers.set("authorization","Bearer " + currentSession.access_token);
+          else if (adminAccessToken) headers.set("x-nsl-access",adminAccessToken);
+          options.headers = headers;
+          return window.fetch(API_ROOT + path,options);
+        }
+        return request().then(function (response) {
+          if (response.status !== 401 || !currentSession || adminAccessToken) return response;
+          if (!apiSessionRefreshPromise) {
+            apiSessionRefreshPromise = supabaseClient.auth.refreshSession().then(function (result) {
+              if (result.error || !result.data || !result.data.session) throw result.error || new Error("Сессия истекла");
+              currentSession = result.data.session;
+              return currentSession;
+            }).finally(function () { apiSessionRefreshPromise = null; });
+          }
+          return apiSessionRefreshPromise.then(request).catch(function () { return response; });
+        });
       }
       var deferredInstallPrompt = null;
       var importedData = window.NSL_IMPORTED_DATA || null;
@@ -397,6 +411,9 @@
       }
       function number(value) {
         return new Intl.NumberFormat("ru-RU").format(value || 0);
+      }
+      function sameRecordId(left,right) {
+        return left != null && right != null && String(left) === String(right);
       }
       function rate(numerator, denominator) {
         return denominator ? numerator / denominator * 100 : 0;
@@ -676,6 +693,7 @@
       }
       function hydrateFinanceCenter() {
         var canRenderFinance = role === "leader";
+        if (!canRenderFinance) return Promise.resolve(null);
         var button = document.getElementById("refreshFinanceBtn");
         if (button && canRenderFinance) button.disabled = true;
         var status = document.getElementById("financeSyncStatus");
@@ -1815,7 +1833,7 @@
           if (Array.isArray(data.periods) && data.periods.length) departmentMonths = data.periods;
           refreshMonthFilters();
           renderDepartmentMonthControl();
-          renderCurrentPageData();
+          requestHydrationRefresh();
         }).catch(function () { renderDepartmentMonthControl(); });
       }
       function openDepartmentMonthArchive(page,month) {
@@ -2137,6 +2155,8 @@
       var sharedStateLastSuccessfulFetch = 0;
       var sharedStateHydrating = false;
       var sharedStateHydrationPromise = null;
+      var hydrationBatchDepth = 0;
+      var hydrationRefreshPending = false;
       var sharedStateSeedAttempted = false;
       var sharedStateWriteTimer = null;
       var sharedStateWriteQueue = {};
@@ -2383,6 +2403,23 @@
           if (current) { populateCardActualPlacements(current); renderBloggerHistory(current); renderCardContractFiles(current); }
         });
       }
+      function beginHydrationBatch() {
+        hydrationBatchDepth += 1;
+      }
+      function requestHydrationRefresh() {
+        if (hydrationBatchDepth) {
+          hydrationRefreshPending = true;
+          return;
+        }
+        refreshAllDerivedViews();
+      }
+      function endHydrationBatch() {
+        hydrationBatchDepth = Math.max(0,hydrationBatchDepth - 1);
+        if (!hydrationBatchDepth && hydrationRefreshPending) {
+          hydrationRefreshPending = false;
+          refreshAllDerivedViews();
+        }
+      }
       function hydrateSharedState(options) {
         options = options || {};
         if (sharedStateHydrationPromise) return sharedStateHydrationPromise;
@@ -2429,9 +2466,9 @@
           if (!data.records.length && !sharedStateLastSync && !sharedStateSeedAttempted && role === "leader") {
             sharedStateSeedAttempted = true;
             var seed = localSharedSeedRecords();
-            return persistSharedStateRecords(seed).then(function () { refreshAllDerivedViews(); });
+            return persistSharedStateRecords(seed).then(function () { requestHydrationRefresh(); });
           }
-          if (data.records.length || options.full) refreshAllDerivedViews(); else renderDataHealth();
+          if (data.records.length || options.full) requestHydrationRefresh(); else renderDataHealth();
           if (applyErrors) console.warn("NSL shared state loaded with skipped records:",applyErrors);
         }).catch(function (error) { sharedStateStatus = "error"; renderDataHealth(); throw error; }).finally(function () {
           sharedStateHydrating = false;
@@ -2478,16 +2515,17 @@
       }
       function syncAllData(showResult) {
         sharedStateStatus = "saving"; renderDataHealth();
+        beginHydrationBatch();
         var tasks = [hydrateSharedState({full:true}),hydrateReachActuals(),hydratePlacementSchedules(),hydrateDepartmentMonths(),hydrateEvidenceReports(),hydrateEmployees()];
         if (role === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(activeMonthKey()),hydrateFinanceCenter());
         return Promise.allSettled(tasks).then(function (results) {
           var failed = results.filter(function (result) { return result.status === "rejected"; }).length;
           var sharedFailed = results[0] && results[0].status === "rejected";
           sharedStateStatus = sharedFailed ? "error" : "ready";
-          refreshAllDerivedViews();
+          requestHydrationRefresh();
           if (showResult) showToast(sharedFailed ? "Общая база временно недоступна" : failed ? "Общая база загружена, часть дополнительных показателей временно недоступна: " + failed : "Все вкладки и расчёты обновлены");
           return {failed:failed,sharedFailed:sharedFailed,total:results.length};
-        });
+        }).finally(endHydrationBatch);
       }
       var staleSessionRefreshPromise = null;
       function refreshStaleSessionData() {
@@ -2612,12 +2650,7 @@
           cacheEmployees();
           sessionStorage.setItem("nslManagerMetrics",JSON.stringify(managerMetrics));
           sessionStorage.setItem("nslSalarySettings",JSON.stringify(salarySettings));
-          refreshStaffSelectors();
-          populateKpiControls();
-          renderEmployees();
-          renderSalaryTable();
-          loadKpiFromData();
-          renderManagerMetrics();
+          requestHydrationRefresh();
         });
       }
       function renameRecordKey(object,oldName,newName) {
@@ -2805,10 +2838,10 @@
             sessionStorage.setItem("nslPlacementFormatActuals",JSON.stringify(placementFormatActuals));
           } catch (cacheError) {}
           if (currentBloggerId) {
-            var current = bloggers.find(function (blogger) { return blogger.id === currentBloggerId; });
+            var current = bloggers.find(function (blogger) { return sameRecordId(blogger.id,currentBloggerId); });
             if (current) { populateCardActualPlacements(current); renderBloggerHistory(current); }
           }
-          renderCurrentPageData();
+          requestHydrationRefresh();
           });
         });
       }
@@ -2847,10 +2880,10 @@
         }).then(function (data) {
           (data.records || []).forEach(applyPlacementScheduleRecord);
           if (currentBloggerId) {
-            var blogger = bloggers.find(function (item) { return item.id === currentBloggerId; });
+            var blogger = bloggers.find(function (item) { return sameRecordId(item.id,currentBloggerId); });
             if (blogger) populateCardActualPlacements(blogger);
           }
-          renderCurrentPageData();
+          requestHydrationRefresh();
         });
       }
       function contractOwnerKey(blogger) {
@@ -2865,7 +2898,7 @@
           return response.json();
         }).then(function (data) {
           blogger.contractFiles = Array.isArray(data.files) ? data.files : [];
-          if (currentBloggerId === blogger.id) { renderCardContractFiles(blogger); renderBloggerHistory(blogger); }
+          if (sameRecordId(currentBloggerId,blogger.id)) { renderCardContractFiles(blogger); renderBloggerHistory(blogger); }
           return blogger.contractFiles;
         });
       }
@@ -2910,6 +2943,13 @@
       function closeLayers() {
         overlay.classList.remove("show");
         document.querySelectorAll(".drawer.show,.modal.show").forEach(function (el) { el.classList.remove("show"); });
+      }
+      function resetBlockingLayers() {
+        closeLayers();
+        var sidebar = document.getElementById("sidebar");
+        var mobileOverlay = document.getElementById("mobileOverlay");
+        if (sidebar) sidebar.classList.remove("open");
+        if (mobileOverlay) mobileOverlay.classList.remove("show");
       }
       function openInfo(title, text) {
         document.getElementById("infoTitle").textContent = title;
@@ -4701,7 +4741,7 @@
           var remoteIds = remoteReports.map(function (item) { return String(item.id); });
           evidenceReports = remoteReports.concat(localReports.filter(function (item) { return remoteIds.indexOf(String(item.id)) < 0; }));
           applyEvidenceFactsToBloggers();
-          refreshAllDerivedViews();
+          requestHydrationRefresh();
         });
       }
       function bloggerTrackedSpend(blogger) {
@@ -4722,7 +4762,7 @@
         document.getElementById("cardContractFileList").innerHTML = contractFilesHtml(blogger);
       }
       function openBlogger(id) {
-        var b = bloggers.find(function (x) { return x.id === Number(id); });
+        var b = bloggers.find(function (x) { return sameRecordId(x.id,id); });
         if (!b) return;
         currentBloggerId = b.id;
         document.getElementById("drawerAvatar").textContent = initials(b.display);
@@ -5003,7 +5043,7 @@
         document.getElementById("contractUploadType").disabled = role === "analyst";
         document.getElementById("kpiSanctions").disabled = role !== "leader";
         if (currentBloggerId) {
-          var current = bloggers.find(function (item) { return item.id === currentBloggerId; });
+          var current = bloggers.find(function (item) { return sameRecordId(item.id,currentBloggerId); });
           if (current) { populateCardActualPlacements(current); renderCardContractFiles(current); renderBloggerHistory(current); }
         }
         syncBloggerEditControls();
@@ -5045,6 +5085,8 @@
           document.getElementById("roleSwitcher").value = appRole;
           loginScreen.classList.add("hidden");
           appShell.classList.remove("hidden");
+          resetBlockingLayers();
+          beginHydrationBatch();
           return hydrateSharedState({full:true}).then(function () {
             var tasks = [hydrateReachActuals(),hydrateDepartmentMonths(),hydrateEmployees(),hydratePlacementSchedules(),hydrateEvidenceReports(),hydrateFinanceCenter()];
             if (appRole === "leader") tasks.push(hydrateKpiAdjustments(),hydrateKpiMonthBloggers(systemMonthKey()),hydrateAdminSummary());
@@ -5054,10 +5096,9 @@
             catch (error) { console.error("Role UI initialization failed",error); }
             var rejected = results.filter(function (item) { return item.status === "rejected"; }).length;
             sharedStateStatus = "ready";
-            refreshAllDerivedViews();
-            renderCurrentPageData();
+            requestHydrationRefresh();
             if (rejected) showToast("Основная база загружена, но часть показателей временно недоступна: " + rejected);
-          });
+          }).finally(endHydrationBatch);
         }).catch(function (error) {
           sharedStateStatus = "error";
           renderDataHealth();
@@ -5228,7 +5269,7 @@
       });
       document.getElementById("saveBloggerBtn").addEventListener("click", function () {
         if (role !== "leader") return showToast("Основные поля карточки меняет администратор; менеджеру доступна отдельная корректировка фактического охвата");
-        var b = bloggers.find(function (x) { return x.id === currentBloggerId; });
+        var b = bloggers.find(function (x) { return sameRecordId(x.id,currentBloggerId); });
         var selectedPlatforms = Array.from(document.querySelectorAll("[data-edit-platform]:checked")).map(function (input) { return input.value; });
         if (!selectedPlatforms.length) return showToast("Выберите хотя бы одну площадку блогера");
         b.name = document.getElementById("editName").value.trim();
@@ -5250,7 +5291,7 @@
       document.getElementById("contractUploadFile").addEventListener("change",function (event) {
         var input = event.target;
         var file = (input.files || [])[0];
-        var blogger = bloggers.find(function (item) { return item.id === currentBloggerId; });
+        var blogger = bloggers.find(function (item) { return sameRecordId(item.id,currentBloggerId); });
         if (!file || !blogger) return;
         if (role === "analyst") { input.value = ""; return showToast("У аналитика доступ только на просмотр"); }
         if (file.size > 15 * 1024 * 1024) { input.value = ""; return showToast("Размер договора не должен превышать 15 МБ"); }
@@ -5288,7 +5329,7 @@
         var download = event.target.closest("[data-contract-download]");
         var remove = event.target.closest("[data-contract-remove]");
         if (!download && !remove) return;
-        var blogger = bloggers.find(function (item) { return item.id === currentBloggerId; });
+        var blogger = bloggers.find(function (item) { return sameRecordId(item.id,currentBloggerId); });
         if (!blogger) return;
         var id = (download || remove).dataset.contractDownload || (download || remove).dataset.contractRemove;
         var metadata = (blogger.contractFiles || []).find(function (file) { return file.id === id; });
@@ -5336,7 +5377,7 @@
             sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords));
             queueSharedStateRecords([sharedPlacementRecord(custom)]);
           }
-          renderPlacementRecords(); renderWeeklyExits(); renderBloggerHistory(bloggers.find(function (record) { return record.id === currentBloggerId; }));
+          renderPlacementRecords(); renderWeeklyExits(); renderBloggerHistory(bloggers.find(function (record) { return sameRecordId(record.id,currentBloggerId); }));
           status.textContent = "Сохранено: " + warmupRangeLabel(item); showToast("Даты прогрева сохранены");
         }).catch(function (error) {
           status.textContent = error.message || "Не удалось сохранить"; showToast("Не удалось сохранить даты прогрева");
@@ -5355,7 +5396,7 @@
         if (!canEditActualReach()) { showToast("У вашей роли нет права менять фактические охваты"); return Promise.reject(new Error("forbidden")); }
         var key = document.getElementById("cardActualPlacement").value;
         var item = findPlacementByOverrideKey(key);
-        var blogger = bloggers.find(function (record) { return record.id === currentBloggerId; });
+        var blogger = bloggers.find(function (record) { return sameRecordId(record.id,currentBloggerId); });
         if (!item || !blogger) { showToast("Выберите связанное размещение"); return Promise.reject(new Error("placement required")); }
         var labels = {stories:"Сторис",reels:"Reels",carousel:"Карусель",post:"Пост"};
         var selectedFormats = selectedCardActualFormats();
@@ -6141,9 +6182,9 @@
         if (adminAccessToken) return activateSession(null);
         loginScreen.classList.remove("hidden"); appShell.classList.add("hidden");
       }).catch(function () { loginScreen.classList.remove("hidden"); appShell.classList.add("hidden"); });
-      window.addEventListener("pageshow",function () { refreshStaleSessionData().catch(function () {}); });
+      window.addEventListener("pageshow",function () { resetBlockingLayers(); refreshStaleSessionData().catch(function () {}); });
       document.addEventListener("visibilitychange",function () { if (!document.hidden) refreshStaleSessionData().catch(function () {}); });
       if ("serviceWorker" in navigator) window.addEventListener("load",function () {
-        navigator.serviceWorker.register("sw.js?v=127",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
+        navigator.serviceWorker.register("sw.js?v=128",{updateViaCache:"none"}).then(function (registration) { return registration.update(); }).catch(function () {});
       });
     })();

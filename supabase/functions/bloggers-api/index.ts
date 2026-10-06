@@ -361,6 +361,29 @@ async function saveDepartmentFinanceSummary(admin: any, summary: any) {
   await admin.from("blogger_shared_state").upsert({ namespace: "finance_department", record_key: "ln-fit-plan-fact-v2", value_json: summary, updated_at: new Date().toISOString(), updated_by: null });
 }
 
+async function readAllSharedStateRows(admin: any, role: string, since: string) {
+  const operationalNamespaces = ["bootstrap_meta","bootstrap_bloggers","bootstrap_placements","bootstrap_reels","bootstrap_weekly_exits","bootstrap_eugenia","blogger","blogger_create","blogger_contract","placement","manager_report","assistant_report","monthly_plan","placement_format","manager_metrics","placement_delete"];
+  const pageSize = 500;
+  const rows: any[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    let query = admin
+      .from("blogger_shared_state")
+      .select("*")
+      .order("updated_at", { ascending: true })
+      .order("namespace", { ascending: true })
+      .order("record_key", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (role !== "leader") query = query.in("namespace", operationalNamespaces);
+    if (since) query = query.gt("updated_at", since);
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     const origin = request.headers.get("origin") || "";
@@ -662,7 +685,16 @@ Deno.serve(async (request: Request) => {
   }
 
   if (path === "/api/shared-state") {
-    if (request.method === "GET") { const since = url.searchParams.get("since") || ""; const operationalNamespaces = ["bootstrap_meta","bootstrap_bloggers","bootstrap_placements","bootstrap_reels","bootstrap_weekly_exits","bootstrap_eugenia","blogger","blogger_create","blogger_contract","placement","manager_report","assistant_report","monthly_plan","placement_format","manager_metrics","placement_delete"]; let query = admin.from("blogger_shared_state").select("*").order("updated_at"); if (role !== "leader") query = query.in("namespace", operationalNamespaces); if (since) query = query.gt("updated_at", since); const { data, error } = await query; if (error) return json(request, { error: error.message }, 500); const records = (data || []).map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt: row.updated_at, updatedBy: row.updated_by })); return json(request, { records, latestUpdatedAt: records.at(-1)?.updatedAt || since, count: records.length }); }
+    if (request.method === "GET") {
+      const since = url.searchParams.get("since") || "";
+      try {
+        const data = await readAllSharedStateRows(admin, role, since);
+        const records = data.map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt: row.updated_at, updatedBy: row.updated_by }));
+        return json(request, { records, latestUpdatedAt: records.at(-1)?.updatedAt || since, count: records.length });
+      } catch (error) {
+        return json(request, { error: error instanceof Error ? error.message : "Не удалось загрузить общую базу" }, 500);
+      }
+    }
     if (request.method === "POST") { const body = await request.json().catch(() => null); const raw = Array.isArray(body?.records) ? body.records : body?.namespace ? [body] : []; if (!raw.length || raw.length > 500) return json(request, { error: "Передайте от 1 до 500 записей" }, 400); const updatedAt = new Date().toISOString(); const records = []; for (const item of raw) { const namespace = String(item?.namespace || ""); const key = String(item?.key || "").trim().slice(0, 300); if (!sharedNamespaces.has(namespace) || !key || (sharedAdminOnly.has(namespace) ? role !== "leader" : !writable(role))) return json(request, { error: "Недостаточно прав или неизвестный раздел" }, 403); const valueText = JSON.stringify(item.value); if (valueText.length > 750000) return json(request, { error: "Запись слишком большая" }, 400); records.push({ namespace, record_key: key, value_json: item.value, updated_at: updatedAt, updated_by: userId }); } const { error } = await admin.from("blogger_shared_state").upsert(records); if (error) return json(request, { error: error.message }, 500); return json(request, { records: records.map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt, updatedBy: userId })), latestUpdatedAt: updatedAt }); }
   }
 
@@ -722,14 +754,21 @@ Deno.serve(async (request: Request) => {
       let { data, error } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false });
       if (error) return json(request, { error: error.message }, 500);
       const currentMonth = systemMonth();
-      const hasActiveMonth = (data || []).some((row: any) => row.status === "active");
+      const staleActiveMonths = (data || []).filter((row: any) => row.status === "active" && row.month_key < currentMonth).map((row: any) => row.month_key);
+      if (staleActiveMonths.length) {
+        const { error: closeError } = await admin.from("blogger_department_months").update({ status: "archived", closed_at: new Date().toISOString(), updated_by: userId }).in("month_key", staleActiveMonths).eq("status", "active");
+        if (closeError) return json(request, { error: closeError.message }, 500);
+      }
       const hasCurrentMonth = (data || []).some((row: any) => row.month_key === currentMonth);
-      if (!hasActiveMonth && !hasCurrentMonth) {
+      if (!hasCurrentMonth) {
         const { error: insertError } = await admin.from("blogger_department_months").upsert(
           { month_key: currentMonth, status: "active", updated_by: userId },
           { onConflict: "month_key", ignoreDuplicates: true },
         );
         if (insertError) return json(request, { error: insertError.message }, 500);
+        ({ data, error } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false }));
+        if (error) return json(request, { error: error.message }, 500);
+      } else if (staleActiveMonths.length) {
         ({ data, error } = await admin.from("blogger_department_months").select("*").order("month_key", { ascending: false }));
         if (error) return json(request, { error: error.message }, 500);
       }
