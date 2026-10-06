@@ -1333,7 +1333,16 @@
         return {start:iso(start),end:iso(end)};
       }
       function reachAuditPlacementKey(item) { return placementOverrideKey(item); }
-      function reachAuditPlacementCandidates(report) {
+      function reachAuditCandidateIndex(placements) {
+        var index = Object.create(null);
+        placements.forEach(function (item,position) {
+          var identity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink);
+          var key = JSON.stringify([identity,placementIsoDate(item)]);
+          (index[key] || (index[key] = [])).push({placement:item,position:position});
+        });
+        return index;
+      }
+      function reachAuditPlacementCandidates(report,candidateIndex) {
         var identity = normalizeBloggerIdentity(report && report.blogger);
         var date = String(report && report.date || "");
         if (!identity || !date) return [];
@@ -1341,15 +1350,27 @@
         (ensureBloggerLookupIndex().byIdentity[identity] || []).forEach(function (blogger) {
           bloggerIdentityAliases(blogger).forEach(function (alias) { if (aliases.indexOf(alias) < 0) aliases.push(alias); });
         });
+        if (candidateIndex) {
+          var found = [];
+          var seen = Object.create(null);
+          aliases.forEach(function (alias) {
+            (candidateIndex[JSON.stringify([alias,date])] || []).forEach(function (entry) {
+              if (seen[entry.position]) return;
+              seen[entry.position] = true;
+              found.push(entry);
+            });
+          });
+          return found.sort(function (a,b) { return a.position - b.position; }).map(function (entry) { return entry.placement; });
+        }
         return synchronizedPlacementRecords().filter(function (item) {
           var placementIdentity = normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink);
           return aliases.indexOf(placementIdentity) >= 0 && placementIsoDate(item) === date;
         });
       }
-      function reachAuditReportPlacementKeys(report) {
+      function reachAuditReportPlacementKeys(report,candidateIndex) {
         var explicit = Array.isArray(report && report.placementKeys) ? report.placementKeys.map(String).filter(Boolean) : [];
         if (explicit.length) return explicit;
-        var candidates = reachAuditPlacementCandidates(report);
+        var candidates = reachAuditPlacementCandidates(report,candidateIndex);
         if (candidates.length === 1) return [reachAuditPlacementKey(candidates[0])];
         var byProject = {};
         candidates.forEach(function (item) {
@@ -1366,8 +1387,8 @@
         var key = reachAuditPlacementKey(item);
         return evidenceReports.filter(function (report) { return reachAuditReportPlacementKeys(report).indexOf(key) >= 0; });
       }
-      function reachAuditRow(item) {
-        var reports = reachAuditReportsForPlacement(item);
+      function reachAuditRow(item,reports) {
+        reports = Array.isArray(reports) ? reports : reachAuditReportsForPlacement(item);
         var verifiedReports = reports.filter(function (report) { return report.status === "Подтверждено" || !report.status; });
         var pendingReports = reports.filter(function (report) { return report.status && report.status !== "Подтверждено"; });
         var directActual = effectivePlacementActual(item);
@@ -1388,7 +1409,20 @@
       }
       function reachAuditRows(options) {
         options = options || {};
-        var rows = synchronizedPlacementRecords().map(reachAuditRow);
+        // Resolve each report once per calculation, not once for every placement.
+        // Keep this index calculation-scoped so edits/status changes are immediately visible.
+        var placements = synchronizedPlacementRecords();
+        var candidateIndex = reachAuditCandidateIndex(placements);
+        var reportsByPlacement = Object.create(null);
+        evidenceReports.forEach(function (report) {
+          var seenKeys = Object.create(null);
+          reachAuditReportPlacementKeys(report,candidateIndex).forEach(function (key) {
+            if (seenKeys[key]) return;
+            seenKeys[key] = true;
+            (reportsByPlacement[key] || (reportsByPlacement[key] = [])).push(report);
+          });
+        });
+        var rows = placements.map(function (item) { return reachAuditRow(item,reportsByPlacement[reachAuditPlacementKey(item)] || []); });
         rows.slice().forEach(function (row) {
           var appliesToBoth = row.reports.some(function (report) {
             return (report.placementLinks || []).some(function (link) { return link.placementKey === row.placementKey && link.project === "Оба"; });

@@ -229,6 +229,72 @@ test("one reach report applies to one exact placement in every matching project"
   assert.doesNotMatch(extractFunction("reachAuditReportPlacementKeys"),/fitby_zlata/);
 });
 
+function reachAuditRuntime(placements,reports) {
+  let normalizations = 0;
+  const context = {
+    evidenceReports:reports,
+    normalizeBloggerIdentity:value => { normalizations += 1; return String(value || "").toLowerCase().replace(/^@/,""); },
+    ensureBloggerLookupIndex:() => ({byIdentity:{alias:[{aliases:["alias","original"]}]}}),
+    bloggerIdentityAliases:blogger => blogger.aliases,
+    synchronizedPlacementRecords:() => placements,
+    placementIsoDate:item => item.date,
+    placementDirection:item => item.project,
+    placementOverrideKey:item => String(item.id),
+    effectivePlacementActual:item => item.actual == null ? null : item.actual,
+    localTodayIso:() => "2026-10-06",
+    monthFromDateValue:value => value.slice(0,7),
+    employeeNameMatches:(expected,actual) => expected === actual,
+  };
+  vm.createContext(context);
+  ["reachAuditPlacementKey","reachAuditCandidateIndex","reachAuditPlacementCandidates","reachAuditReportPlacementKeys","reachAuditReportsForPlacement","reachAuditRow","reachAuditRows"].forEach(name => vm.runInContext(extractFunction(name),context));
+  return {context,normalizations:() => normalizations};
+}
+
+test("indexed report links preserve aliases, placement order and ambiguous same-day integrations",() => {
+  const placements = [
+    {id:"1",tag:"original",date:"2026-09-01",project:"ЛН"},
+    {id:"2",tag:"alias",date:"2026-09-01",project:"FIT PRO"},
+    {id:"3",tag:"original",date:"2026-09-02",project:"ЛН"},
+  ];
+  const {context} = reachAuditRuntime(placements,[]);
+  const report = {blogger:"@alias",date:"2026-09-01"};
+  const index = context.reachAuditCandidateIndex(placements);
+  assert.deepEqual(Array.from(context.reachAuditPlacementCandidates(report,index)),placements.slice(0,2));
+  assert.deepEqual(Array.from(context.reachAuditReportPlacementKeys(report,index)),["1","2"]);
+  placements.push({id:"4",tag:"original",date:"2026-09-01",project:"ЛН"});
+  assert.deepEqual(Array.from(context.reachAuditReportPlacementKeys(report,context.reachAuditCandidateIndex(placements))),[]);
+});
+
+test("indexed reach calculations match legacy row results and immediately see report edits",() => {
+  const placements = Array.from({length:30},(_,i) => ({id:String(i),tag:`blogger${i}`,date:"2026-09-01",project:i % 2 ? "FIT PRO" : "ЛН",manager:"Manager",guaranteed:1000,actual:i % 3 ? 500 : null}));
+  const reports = Array.from({length:20},(_,i) => ({blogger:`blogger${i}`,date:"2026-09-01",reach:600,status:i % 2 ? "На проверке" : "Подтверждено"}));
+  reports.push({placementKeys:["1","1"],reach:700,status:"Подтверждено"});
+  const {context} = reachAuditRuntime(placements,reports);
+  const naive = placements.map(item => context.reachAuditRow(item));
+  assert.equal(JSON.stringify(context.reachAuditRows({month:"2026-09"})),JSON.stringify(naive));
+  reports[1].reach = 900;
+  reports[1].status = "Подтверждено";
+  const changed = context.reachAuditRows({month:"2026-09"}).find(row => row.placementId === "1");
+  assert.equal(changed.factReach,900);
+  assert.equal(changed.isVerified,true);
+  reports[1].placementKeys = ["2"];
+  assert.equal(context.reachAuditRows({month:"2026-09"}).find(row => row.placementId === "2").factReach,900);
+});
+
+test("large reach register resolves each report once and retains both-project attribution",() => {
+  const placements = Array.from({length:1000},(_,i) => ({id:String(i),tag:`blogger${i}`,date:"2026-09-01",project:"ЛН",guaranteed:1000,actual:500}));
+  const reports = Array.from({length:299},(_,i) => ({blogger:`blogger${i}`,date:"2026-09-01",reach:600,status:"Подтверждено"}));
+  reports[0].placementKeys = ["0"];
+  reports[0].placementLinks = [{placementKey:"0",project:"Оба"}];
+  const runtime = reachAuditRuntime(placements,reports);
+  const rows = runtime.context.reachAuditRows({month:"2026-09"});
+  assert.equal(rows.length,1001);
+  assert.ok(runtime.normalizations() <= 2300,`normalizations: ${runtime.normalizations()}`);
+  const both = rows.filter(row => row.placementId === "0");
+  assert.deepEqual(Array.from(both,row => row.project),["ЛН","FIT PRO"]);
+  assert.ok(both.every(row => row.factReach === 600 && row.guarantee === 1000));
+});
+
 test("evidence blogger search tolerates one typo and keeps unlinked reports saveable",() => {
   const context = {String,Math,Array,normalizeBloggerIdentity:value => String(value || "").trim().toLowerCase().replace(/^@/,"")};
   vm.createContext(context);
@@ -418,7 +484,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=128/);
+  assert.match(index,/october-exits-v124\.js\?v=129/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -431,9 +497,9 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v127\.js\?v=128/);
+  assert.match(index,/blogger-base-v127\.js\?v=129/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v128-october-sync/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v129-reach-index/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
 });
