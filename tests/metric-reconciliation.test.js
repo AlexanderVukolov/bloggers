@@ -83,8 +83,8 @@ test("placement guarantee is copied from the blogger card and kept separate from
   assert.equal(guaranteeFor({reach:9000}),9000);
   assert.equal(guaranteeFor({plannedReach:"invalid",reach:9000}),0);
   assert.match(source,/guaranteeInput\.value = String\(guarantee\)/);
-  assert.match(source,/guaranteed:bloggerPlacementGuarantee\(blogger\)/);
-  assert.match(source,/guaranteed:bloggerPlacementGuarantee\(blogger\),\s*actual:null/);
+  assert.match(source,/guaranteed:index === 0 \? bloggerPlacementGuarantee\(blogger\) : 0/);
+  assert.match(source,/actual:null,clicks:null/);
   assert.match(source,/plannedReach:Number\(document\.getElementById\("newReach"\)\.value \|\| 0\), reach:0/);
   assert.match(source,/id="editPlannedReach"/);
   assert.match(source,/id="createPlacementFromBloggerBtn"/);
@@ -542,13 +542,109 @@ test("daily reports wait for shared database confirmation and the current month 
   assert.match(source,/сохранён в общей базе/);
 });
 
-test("future month exits wait for database save and open the created month",() => {
-  assert.match(source,/var recordMonth = monthFromDateValue\(record\.sortDate\)/);
-  assert.match(source,/placementMonthFilter\.value = recordMonth/);
-  assert.match(source,/monthFilter\.value = recordMonth/);
-  assert.match(source,/sharedPlacementSave\.then\(function \(\) \{\s*return persistPlacementSchedule/);
-  assert.match(source,/Выход сохранён в общей базе для/);
-  assert.match(source,/customPlacementRecords = customPlacementRecords\.filter/);
+test("batch placement creation waits for shared persistence before updating registers",() => {
+  const save = extractFunction("submitPlacementCreator");
+  assert.ok(save.indexOf("persistSharedStateRecords(records.map(sharedPlacementRecord))") < save.indexOf("customPlacementRecords.unshift(record)"));
+  assert.match(save,/placementCreationDraft\.saved = true/);
+  assert.match(save,/placementMonthFilter\.value = recordMonth/);
+  assert.match(save,/monthFilter\.value = recordMonth/);
+});
+
+function placementBatchRuntime() {
+  const values = {newPlacementMode:"batch",newPlacementDate:"2026-10-06",newPlacementReelsDate:"2026-10-08",newPlacementCarouselDate:"2026-10-10",newPlacementFormat:"Telegram",newPlacementBlogger:"7",newPlacementCost:"15000",newPlacementDirection:"Оба",newPlacementDecision:"На оценке",newPlacementManager:"Manager",newPlacementDealType:"Коммерция",newPlacementBrief:"Готово",newPlacementContract:"Подписан",newPlacementWarmupStart:"",newPlacementWarmupEnd:"",newPlacementComment:"Package"};
+  const nodes = Object.fromEntries(Object.entries(values).map(([id,value])=>[id,{value}]));
+  nodes.exitMonthFilter={value:"2026-09"}; nodes.placementMonthFilter={value:"2026-09"};
+  const button={disabled:false,textContent:"Сохранить"};
+  let resets=0;
+  const form={querySelector:()=>button,reset:()=>resets++};
+  const saves=[],schedules=[],toasts=[];
+  const context={String,Number,Array,Object,Math,Date,Promise,console,
+    document:{getElementById:id=>nodes[id],querySelectorAll:()=>[]},
+    bloggers:[{id:7,name:"@blogger",display:"blogger",plannedReach:9000}],
+    role:"manager",placementCreateOrigin:"calendar",placementCreationDraft:null,placementCreationPending:false,
+    customPlacementRecords:[],placementRecords:[],weeklyExits:[],
+    bloggerPlacementGuarantee:blogger=>blogger.plannedReach,shortIsoDate:String,
+    sharedPlacementRecord:record=>({namespace:"placement",key:record.id,value:record}),
+    persistSharedStateRecords:records=>{saves.push(records);return context.persist(records);},
+    persist:()=>Promise.resolve(),persistPlacementSchedule:(record,start,end)=>{schedules.push({record,start,end});return Promise.resolve();},
+    weeklyExitFromPlacement:record=>({sourcePlacementId:record.id}),
+    invalidateDerivedData(){},refreshAllDerivedViews(){},closeLayers(){},navigate(){},
+    monthFromDateValue:value=>value.slice(0,7),activeMonthLabel:String,
+    sessionStorage:{setItem(){}},showToast:message=>toasts.push(message)};
+  vm.createContext(context);
+  ["placementCreatorEntries","validPlacementDate","buildPlacementBatch","submitPlacementCreator"].forEach(name=>vm.runInContext(extractFunction(name),context));
+  return {context,nodes,button,saves,schedules,toasts,resets:()=>resets,submit:()=>context.submitPlacementCreator({preventDefault(){},target:form})};
+}
+
+test("one placement form creates three exact exits without multiplying package cost or guarantee",async () => {
+  const runtime=placementBatchRuntime();
+  let resolve;
+  runtime.context.persist=()=>new Promise(done=>{resolve=done;});
+  const pending=runtime.submit();
+  assert.equal(runtime.saves.length,1);
+  assert.equal(runtime.saves[0].length,3);
+  assert.equal(runtime.context.placementRecords.length,0);
+  assert.equal(runtime.button.disabled,true);
+  runtime.submit();
+  assert.equal(runtime.saves.length,1);
+  resolve(); await pending;
+  const records=runtime.saves[0].map(row=>row.value);
+  assert.deepEqual(Array.from(records,item=>[item.type,item.sortDate]),[["Stories","2026-10-06"],["Reels","2026-10-08"],["Карусель / пост","2026-10-10"]]);
+  assert.equal(new Set(records.map(item=>item.id)).size,3);
+  assert.equal(records.reduce((sum,item)=>sum+item.cost,0),15000);
+  assert.equal(records.reduce((sum,item)=>sum+item.guaranteed,0),9000);
+  assert.ok(records.every(item=>item.actual===null && item.bloggerId==="7" && item.direction==="Оба"));
+  assert.ok(records.every(item=>item.warmupStart==="2026-10-06" && item.warmupEnd==="2026-10-10"));
+  assert.equal(runtime.context.weeklyExits.length,3);
+  assert.equal(runtime.schedules.length,3);
+  assert.equal(runtime.resets(),1);
+  assert.equal(runtime.button.disabled,false);
+  assert.equal(runtime.nodes.exitMonthFilter.value,"2026-10");
+});
+
+test("empty format sections are skipped and legacy single formats remain available",async () => {
+  const runtime=placementBatchRuntime();
+  runtime.nodes.newPlacementDate.value="";runtime.nodes.newPlacementCarouselDate.value="";
+  await runtime.submit();
+  assert.equal(runtime.saves[0].length,1);
+  assert.equal(runtime.saves[0][0].value.type,"Reels");
+  assert.equal(runtime.saves[0][0].value.guaranteed,9000);
+  const single=placementBatchRuntime(); single.nodes.newPlacementMode.value="single";
+  await single.submit();
+  assert.equal(single.saves[0].length,1);
+  assert.equal(single.saves[0][0].value.type,"Telegram");
+});
+
+test("failed batch saves keep entered values and retry the same IDs without local phantom exits",async () => {
+  const runtime=placementBatchRuntime();
+  runtime.context.persist=()=>Promise.reject(Error("Offline"));
+  await runtime.submit();
+  assert.equal(runtime.context.placementRecords.length,0);
+  assert.equal(runtime.context.weeklyExits.length,0);
+  assert.equal(runtime.resets(),0);
+  assert.equal(runtime.button.disabled,false);
+  runtime.context.persist=()=>Promise.resolve();
+  await runtime.submit();
+  assert.deepEqual(runtime.saves[1].map(item=>item.key),runtime.saves[0].map(item=>item.key));
+  assert.equal(runtime.context.placementRecords.length,3);
+});
+
+test("invalid batch dates, missing exits and read-only roles never write; different months stay visible",async () => {
+  for(const date of ["2026-02-30","bad"]){const runtime=placementBatchRuntime();runtime.nodes.newPlacementDate.value=date;await runtime.submit();assert.equal(runtime.saves.length,0);}
+  const empty=placementBatchRuntime();["newPlacementDate","newPlacementReelsDate","newPlacementCarouselDate"].forEach(id=>empty.nodes[id].value="");await empty.submit();assert.equal(empty.saves.length,0);
+  const analyst=placementBatchRuntime();analyst.context.role="analyst";await analyst.submit();assert.equal(analyst.saves.length,0);
+  const mixed=placementBatchRuntime();mixed.nodes.newPlacementCarouselDate.value="2026-11-01";await mixed.submit();assert.equal(mixed.nodes.exitMonthFilter.value,"");assert.equal(mixed.context.placementRecords.length,3);
+});
+
+test("schedule failures retain all saved exits and do not ask users to recreate the package",async () => {
+  const runtime=placementBatchRuntime();
+  runtime.context.persistPlacementSchedule=()=>Promise.reject(Error("Schedule unavailable"));
+  await runtime.submit();
+  assert.equal(runtime.context.placementRecords.length,3);
+  assert.equal(runtime.context.weeklyExits.length,3);
+  assert.equal(runtime.saves.length,1);
+  assert.equal(runtime.resets(),1);
+  assert.match(runtime.toasts.at(-1),/выходы сохранены/);
 });
 
 test("future month compatibility patch keeps filters and warmup dates aligned",() => {
@@ -556,7 +652,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=130/);
+  assert.match(index,/october-exits-v124\.js\?v=131/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -569,9 +665,9 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v127\.js\?v=130/);
+  assert.match(index,/blogger-base-v127\.js\?v=131/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v130-evidence-save/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v131-multi-exits/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
 });

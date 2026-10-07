@@ -39,12 +39,14 @@
     if (!form || !date || !start || !end) return;
 
     date.addEventListener("change",function () {
+      if (document.getElementById("newPlacementMode")) return; // The batch creator manages the complete warmup range.
       if (!monthFromDate(date.value)) return;
       if (!start.value || start.value === end.value) start.value = date.value;
       if (!end.value || end.value < start.value) end.value = date.value;
     });
 
     form.addEventListener("submit",function () {
+      if (document.getElementById("newPlacementMode")) return; // Month changes follow successful batch persistence.
       var month = monthFromDate(date.value);
       if (!month) return;
       window.setTimeout(function () {

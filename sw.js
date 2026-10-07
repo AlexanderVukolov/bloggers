@@ -1,4 +1,4 @@
-const CACHE_NAME = "nsl-bloggers-github-v130-evidence-save";
+const CACHE_NAME = "nsl-bloggers-github-v131-multi-exits";
 const APP_ROOT = new URL("./", self.registration.scope).pathname;
 const APP_SHELL = [
   APP_ROOT,

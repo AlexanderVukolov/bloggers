@@ -22,7 +22,7 @@
   if (placementGuaranteeInput) {
     placementGuaranteeInput.readOnly = true;
     placementGuaranteeInput.closest(".field").querySelector("label").textContent = "Плановый / гарантированный охват";
-    placementGuaranteeInput.insertAdjacentHTML("afterend", '<small>Автоматически из карточки блогера. Фактический охват вносится после выхода отдельно.</small>');
+    placementGuaranteeInput.insertAdjacentHTML("afterend", '<small>Общий план из карточки. Стоимость и гарант учитываются один раз, у первого заполненного формата. Факт вносится отдельно по каждому выходу.</small>');
   }
   var evidenceBloggerSelect = document.getElementById("evidenceBlogger");
   if (evidenceBloggerSelect && !document.getElementById("evidenceBloggerSearch")) {
@@ -4297,7 +4297,7 @@
         }
         var guarantee = bloggerPlacementGuarantee(blogger);
         document.getElementById("newPlacementBloggerName").textContent = blogger.display + " · " + blogger.name;
-        document.getElementById("newPlacementBloggerMeta").textContent = blogger.brand + " · " + blogger.manager + " · " + blogger.category + " · план охвата " + number(guarantee);
+        document.getElementById("newPlacementBloggerMeta").textContent = [blogger.brand,blogger.manager,blogger.category].filter(Boolean).join(" · ") + " · план охвата " + number(guarantee);
         document.getElementById("newPlacementManager").value = activeEmployeeManagers().indexOf(blogger.manager) >= 0 ? blogger.manager : (activeEmployeeManagers()[0] || "");
         document.getElementById("newPlacementDirection").value = blogger.brand;
         guaranteeInput.value = String(guarantee);
@@ -6016,7 +6016,135 @@
           showToast(status === "Подтверждено" ? "Охват проверен и подтверждён" : "Отчёт отправлен на уточнение");
         }).catch(function (error) { showToast(error && error.message ? error.message : "Не удалось проверить отчёт"); });
       });
+      var placementCreationDraft = null;
+      var placementCreationPending = false;
+      var placementWarmupAutomatic = true;
+      function placementCreatorEntries() {
+        if (document.getElementById("newPlacementMode").value === "single") {
+          return [{date:document.getElementById("newPlacementDate").value,format:document.getElementById("newPlacementFormat").value}];
+        }
+        return [
+          {date:document.getElementById("newPlacementDate").value,format:"Stories"},
+          {date:document.getElementById("newPlacementReelsDate").value,format:"Reels"},
+          {date:document.getElementById("newPlacementCarouselDate").value,format:"Карусель / пост"}
+        ].filter(function (entry) { return entry.date; });
+      }
+      function updatePlacementCreatorMode() {
+        var single = document.getElementById("newPlacementMode").value === "single";
+        ["newPlacementReelsSection","newPlacementCarouselSection"].forEach(function (id) { document.getElementById(id).classList.toggle("hidden",single); });
+        ["newPlacementReelsDate","newPlacementCarouselDate"].forEach(function (id) { document.getElementById(id).disabled = single; });
+        document.getElementById("newPlacementSingleFormatField").classList.toggle("hidden",!single);
+        document.getElementById("newPlacementFormat").disabled = !single;
+        document.getElementById("newPlacementDate").required = single;
+        document.getElementById("newPlacementDateTitle").textContent = single ? "Один выход" : "Stories";
+        document.querySelector('label[for="newPlacementDate"]').textContent = single ? "Дата выхода" : "Дата Stories";
+        if (single && !document.getElementById("newPlacementDate").value) document.getElementById("newPlacementDate").value = localTodayIso();
+        updatePlacementCreatorWarmup();
+      }
+      function updatePlacementCreatorWarmup() {
+        if (!placementWarmupAutomatic) return;
+        var dates = placementCreatorEntries().map(function (entry) { return entry.date; }).filter(Boolean).sort();
+        document.getElementById("newPlacementWarmupStart").value = dates[0] || "";
+        document.getElementById("newPlacementWarmupEnd").value = dates[dates.length - 1] || "";
+      }
+      function validPlacementDate(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+        var date = new Date(value + "T12:00:00Z");
+        return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === value;
+      }
+      function buildPlacementBatch(blogger,entries,settings,batchId) {
+        if (!entries.length) throw new Error("Укажите дату хотя бы одного выхода");
+        if (entries.some(function (entry) { return !validPlacementDate(entry.date) || !entry.format; })) throw new Error("Выберите корректные даты выходов");
+        var dates = entries.map(function (entry) { return entry.date; }).sort();
+        var warmupStart = settings.warmupStart || dates[0];
+        var warmupEnd = settings.warmupEnd || dates[dates.length - 1];
+        if (!validPlacementDate(warmupStart) || !validPlacementDate(warmupEnd) || warmupEnd < warmupStart) throw new Error("Проверьте даты начала и окончания прогрева");
+        var cost = Number(settings.cost || 0);
+        if (!Number.isFinite(cost) || cost < 0) throw new Error("Укажите корректную общую стоимость");
+        return entries.map(function (entry,index) {
+          var parts = entry.date.split("-");
+          return {
+            id:batchId + "-" + index,batchId:batchId,bloggerId:String(blogger.id),createdAt:new Date().toISOString(),
+            start:parts[2] + "." + parts[1] + "." + parts[0],sortDate:entry.date,
+            warmupStart:warmupStart,warmupEnd:warmupEnd,warmup:shortIsoDate(warmupStart) + "–" + shortIsoDate(warmupEnd),
+            tag:blogger.name || blogger.display,sourceKey:blogger.sourceKey || "blogger-" + blogger.id,
+            direction:settings.direction,decision:settings.decision,manager:settings.manager,dealType:settings.dealType,brief:settings.brief,
+            fullName:blogger.display || blogger.name,contract:settings.contract,chat:false,
+            platform:blogger.link || (blogger.platforms || []).join(", "),type:entry.format,duration:"—",
+            cost:index === 0 ? cost : 0,guaranteed:index === 0 ? bloggerPlacementGuarantee(blogger) : 0,
+            actual:null,clicks:null,leads:0,sales:0,revenue:0,comment:settings.comment || "Новое размещение",source:"Ручное добавление"
+          };
+        });
+      }
+      function submitPlacementCreator(event) {
+        event.preventDefault();
+        if (placementCreationPending) return;
+        if (role === "analyst") return showToast("У аналитика доступ только на просмотр");
+        var bloggerId = document.getElementById("newPlacementBlogger").value;
+        var blogger = bloggers.find(function (item) { return String(item.id) === String(bloggerId); });
+        if (!blogger) return showToast("Сначала выберите блогера из базы");
+        var settings = {};
+        ["direction","decision","manager","dealType","brief","contract","cost","warmupStart","warmupEnd","comment"].forEach(function (key) {
+          settings[key] = document.getElementById("newPlacement" + key.charAt(0).toUpperCase() + key.slice(1)).value;
+        });
+        settings.comment = settings.comment.trim();
+        var entries = placementCreatorEntries();
+        var signature = JSON.stringify([String(blogger.id),entries,settings,bloggerPlacementGuarantee(blogger)]);
+        var records;
+        try {
+          if (!placementCreationDraft || placementCreationDraft.signature !== signature) {
+            var batchId = "placement-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+            placementCreationDraft = {signature:signature,records:buildPlacementBatch(blogger,entries,settings,batchId)};
+          }
+          if (placementCreationDraft.saved) return showToast("Эти выходы уже сохранены. Обновите реестр");
+          records = placementCreationDraft.records;
+        } catch (error) { return showToast(error.message); }
+        var destination = placementCreateOrigin === "calendar" ? "calendar" : "placements";
+        var recordMonths = records.map(function (record) { return monthFromDateValue(record.sortDate); }).filter(function (month,index,all) { return all.indexOf(month) === index; });
+        var recordMonth = recordMonths.length === 1 ? recordMonths[0] : "";
+        var submitButton = event.target.querySelector('button[type="submit"]');
+        var submitLabel = submitButton.textContent;
+        placementCreationPending = true;
+        submitButton.disabled = true; submitButton.textContent = "Сохраняю " + records.length + "…";
+        // One database request stores the entire package; nothing appears locally before confirmation.
+        return persistSharedStateRecords(records.map(sharedPlacementRecord)).then(function () {
+          placementCreationDraft.saved = true;
+          records.forEach(function (record) {
+            if (!customPlacementRecords.some(function (item) { return String(item.id) === String(record.id); })) customPlacementRecords.unshift(record);
+            if (!placementRecords.some(function (item) { return String(item.id) === String(record.id); })) placementRecords.unshift(record);
+            if (!weeklyExits.some(function (item) { return String(item.sourcePlacementId || "") === String(record.id); })) weeklyExits.unshift(weeklyExitFromPlacement(record));
+          });
+          invalidateDerivedData();
+          try { sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords)); } catch (cacheError) { console.warn("NSL local placement cache skipped",cacheError); }
+          expandedPlacementId = records[0].id; placementPage = 1; placementQuickFilter = "all";
+          document.querySelectorAll("#placementQuickFilters .quick-filter").forEach(function (item) { item.classList.toggle("active",item.dataset.placementQuick === "all"); });
+          refreshAllDerivedViews();
+          if (destination === "calendar") {
+            var monthFilter = document.getElementById("exitMonthFilter");
+            if (monthFilter) monthFilter.value = recordMonth;
+            ["exitSearch","exitReachMin","exitReachMax","exitDateFrom","exitDateTo","exitManagerFilter","exitFormatFilter","exitActualFilter"].forEach(function (id) { var control = document.getElementById(id); if (control) control.value = ""; });
+            exitPage = 1;
+          } else {
+            var placementMonthFilter = document.getElementById("placementMonthFilter");
+            if (placementMonthFilter) placementMonthFilter.value = recordMonth;
+          }
+          return Promise.all(records.map(function (record) {
+            return persistPlacementSchedule(record,record.warmupStart,record.warmupEnd).then(function () { return true; }).catch(function () { return false; });
+          }));
+        }).then(function (schedules) {
+          placementCreationDraft = null;
+          closeLayers(); event.target.reset(); navigate(destination);
+          showToast("Сохранено выходов: " + records.length + " · " + (blogger.display || blogger.name) + (recordMonth ? " · " + activeMonthLabel(recordMonth) : "") + (schedules.every(Boolean) ? "" : " · выходы сохранены, синхронизацию прогрева нужно повторить"));
+          placementCreateOrigin = "placements";
+        }).catch(function (error) {
+          showToast(placementCreationDraft && placementCreationDraft.saved ? "Выходы сохранены в общей базе. Обновите реестр, чтобы увидеть их" : error && error.message ? error.message : "Выходы не сохранились в общей базе. Повторите ещё раз");
+        }).finally(function () {
+          placementCreationPending = false;
+          submitButton.disabled = false; submitButton.textContent = submitLabel;
+        });
+      }
       function openPlacementCreator(origin,bloggerId) {
+        if (placementCreationPending) return showToast("Дождитесь сохранения выбранных выходов");
         if (role === "analyst") return showToast("У аналитика доступ только на просмотр");
         placementCreateOrigin = origin === "calendar" ? "calendar" : "placements";
         document.getElementById("newPlacementBloggerSearch").value = "";
@@ -6025,17 +6153,18 @@
           document.getElementById("newPlacementBlogger").value = String(bloggerId);
           updatePlacementBloggerPreview();
         }
-        var today = localTodayIso();
-        document.getElementById("newPlacementDate").value = today;
-        document.getElementById("newPlacementWarmupStart").value = today;
-        document.getElementById("newPlacementWarmupEnd").value = today;
+        placementCreationDraft = null;
+        placementWarmupAutomatic = true;
+        document.getElementById("newPlacementMode").value = "batch";
+        ["newPlacementDate","newPlacementReelsDate","newPlacementCarouselDate","newPlacementWarmupStart","newPlacementWarmupEnd"].forEach(function (id) { document.getElementById(id).value = ""; });
+        updatePlacementCreatorMode();
         var modal = document.getElementById("addPlacementModal");
         var title = modal.querySelector(".modal-head h3");
         var hint = modal.querySelector(".modal-head p");
         var submit = modal.querySelector('button[type="submit"]');
         title.textContent = placementCreateOrigin === "calendar" ? "Новый выход" : "Новое размещение";
         hint.textContent = placementCreateOrigin === "calendar" ? "Добавьте выход вручную — он сохранится в общей базе и карточке блогера" : "Сначала выберите блогера из общей базы";
-        submit.textContent = placementCreateOrigin === "calendar" ? "Добавить выход" : "Создать размещение";
+        submit.textContent = "Сохранить выбранные выходы";
         openLayer(modal);
       }
       document.getElementById("addPlacementBtn").addEventListener("click", function () {
@@ -6047,85 +6176,14 @@
       });
       document.getElementById("newPlacementBlogger").addEventListener("change",updatePlacementBloggerPreview);
       document.getElementById("newPlacementBloggerSearch").addEventListener("input",populatePlacementBloggerSelect);
-      document.getElementById("newPlacementDate").addEventListener("change",function () {
-        var date = this.value;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-        var start = document.getElementById("newPlacementWarmupStart");
-        var end = document.getElementById("newPlacementWarmupEnd");
-        if (!start.value || start.value === end.value) start.value = date;
-        if (!end.value || end.value < start.value) end.value = date;
-      });
+      document.getElementById("newPlacementMode").addEventListener("change",updatePlacementCreatorMode);
+      ["newPlacementDate","newPlacementReelsDate","newPlacementCarouselDate"].forEach(function (id) { document.getElementById(id).addEventListener("change",updatePlacementCreatorWarmup); });
+      ["newPlacementWarmupStart","newPlacementWarmupEnd"].forEach(function (id) { document.getElementById(id).addEventListener("change",function () { placementWarmupAutomatic = false; }); });
       document.getElementById("openSelectedBloggerBtn").addEventListener("click",function () {
         var id = document.getElementById("newPlacementBlogger").value;
         if (id) openBlogger(id);
       });
-      document.getElementById("addPlacementForm").addEventListener("submit",function (event) {
-        event.preventDefault();
-        var bloggerId = document.getElementById("newPlacementBlogger").value;
-        var blogger = bloggers.find(function (item) { return String(item.id) === String(bloggerId); });
-        if (!blogger) return showToast("Сначала выберите блогера из базы");
-        var isoDate = document.getElementById("newPlacementDate").value;
-        var warmupStart = document.getElementById("newPlacementWarmupStart").value;
-        var warmupEnd = document.getElementById("newPlacementWarmupEnd").value;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return showToast("Выберите дату выхода");
-        if (warmupEnd < warmupStart) return showToast("Дата окончания прогрева не может быть раньше даты старта");
-        var parts = isoDate.split("-");
-        var displayDate = parts.length === 3 ? parts[2] + "." + parts[1] + "." + parts[0] : isoDate;
-        var record = {
-          id:Date.now(),createdAt:new Date().toISOString(),start:displayDate,sortDate:isoDate,warmupStart:warmupStart,warmupEnd:warmupEnd,warmup:shortIsoDate(warmupStart) + "–" + shortIsoDate(warmupEnd),
-          tag:blogger.name || blogger.display,sourceKey:blogger.sourceKey || "blogger-" + blogger.id,direction:document.getElementById("newPlacementDirection").value,
-          decision:document.getElementById("newPlacementDecision").value,manager:document.getElementById("newPlacementManager").value,
-          dealType:document.getElementById("newPlacementDealType").value,brief:document.getElementById("newPlacementBrief").value,
-          fullName:blogger.display,contract:document.getElementById("newPlacementContract").value,chat:false,
-          platform:blogger.link || (blogger.platforms || []).join(", "),type:document.getElementById("newPlacementFormat").value,duration:"—",
-          cost:Number(document.getElementById("newPlacementCost").value || 0),guaranteed:bloggerPlacementGuarantee(blogger),
-          actual:null,clicks:null,leads:0,sales:0,revenue:0,comment:document.getElementById("newPlacementComment").value.trim() || "Новое размещение",
-          source:"Ручное добавление"
-        };
-        customPlacementRecords.unshift(record); placementRecords.unshift(record); weeklyExits.unshift(weeklyExitFromPlacement(record));
-        invalidateDerivedData();
-        var sharedPlacementSave = persistSharedStateRecords([sharedPlacementRecord(record)]);
-        try { sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords)); } catch (cacheError) { console.warn("NSL local placement cache skipped",cacheError); }
-        expandedPlacementId = record.id; placementPage = 1; placementQuickFilter = "all";
-        document.querySelectorAll("#placementQuickFilters .quick-filter").forEach(function (item) { item.classList.toggle("active",item.dataset.placementQuick === "all"); });
-        var destination = placementCreateOrigin === "calendar" ? "calendar" : "placements";
-        var recordMonth = monthFromDateValue(record.sortDate);
-        var submitButton = event.target.querySelector('button[type="submit"]');
-        var submitLabel = submitButton.textContent;
-        submitButton.disabled = true;
-        submitButton.textContent = "Сохраняю…";
-        refreshAllDerivedViews();
-        if (destination === "calendar") {
-          var monthFilter = document.getElementById("exitMonthFilter");
-          if (monthFilter && recordMonth) monthFilter.value = recordMonth;
-          ["exitSearch","exitReachMin","exitReachMax","exitDateFrom","exitDateTo"].forEach(function (id) { var control = document.getElementById(id); if (control) control.value = ""; });
-          ["exitManagerFilter","exitFormatFilter","exitActualFilter"].forEach(function (id) { var control = document.getElementById(id); if (control) control.value = ""; });
-          exitPage = 1;
-        } else {
-          var placementMonthFilter = document.getElementById("placementMonthFilter");
-          if (placementMonthFilter && recordMonth) placementMonthFilter.value = recordMonth;
-        }
-        sharedPlacementSave.then(function () {
-          return persistPlacementSchedule(record,warmupStart,warmupEnd).catch(function () {
-            showToast("Выход сохранён, но даты прогрева нужно повторить");
-          });
-        }).then(function () {
-          closeLayers(); event.target.reset(); navigate(destination);
-          showToast((destination === "calendar" ? "Выход сохранён в общей базе для " : "Размещение сохранено в общей базе для ") + (blogger.display || blogger.name) + (recordMonth ? " · " + activeMonthLabel(recordMonth) : ""));
-          placementCreateOrigin = "placements";
-        }).catch(function (error) {
-          customPlacementRecords = customPlacementRecords.filter(function (item) { return String(item.id) !== String(record.id); });
-          placementRecords = placementRecords.filter(function (item) { return String(item.id) !== String(record.id); });
-          weeklyExits = weeklyExits.filter(function (item) { return String(item.sourcePlacementId || "") !== String(record.id); });
-          invalidateDerivedData();
-          try { sessionStorage.setItem("nslCustomPlacements",JSON.stringify(customPlacementRecords)); } catch (cacheError) {}
-          refreshAllDerivedViews();
-          showToast(error && error.message ? error.message : "Выход не сохранился в общей базе. Повторите ещё раз");
-        }).finally(function () {
-          submitButton.disabled = false;
-          submitButton.textContent = submitLabel;
-        });
-      });
+      document.getElementById("addPlacementForm").addEventListener("submit",submitPlacementCreator);
       document.getElementById("calendarAddBtn").addEventListener("click", function () { openPlacementCreator("calendar"); });
       document.getElementById("inviteBtn").addEventListener("click", function () { openEmployeeEditor(null); });
       document.getElementById("employeeRole").addEventListener("change",toggleEmployeeManagerField);
