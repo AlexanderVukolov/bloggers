@@ -905,10 +905,12 @@
         });
       }
       var bloggerLookupIndex = null;
+      var placementBloggerLookupCache = null;
       var synchronizedPlacementCache = null;
       var synchronizedExitCache = null;
       function invalidateDerivedData() {
         bloggerLookupIndex = null;
+        placementBloggerLookupCache = null;
         synchronizedPlacementCache = null;
         synchronizedExitCache = null;
       }
@@ -1141,6 +1143,7 @@
           }
         });
         synchronizedPlacementCache = distinctPlacementRowsById(additions.concat(rows));
+        placementBloggerLookupCache = null;
         return synchronizedPlacementCache;
       }
       function effectivePlacementActual(item) {
@@ -3127,14 +3130,40 @@
       function newBloggersForMonth(month) {
         return bloggers.filter(function (blogger) { return monthFromDateValue(blogger.createdAt) === month; }).sort(function (a,b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); });
       }
-      function confirmedKpiExitForBlogger(blogger) {
+      function kpiExitSourceIndex(records,isReport) {
+        var index = Object.create(null);
+        records.forEach(function (item,position) {
+          var keys = (isReport ? [item.blogger] : [item.sourceKey,item.tag,item.bloggerLink]).map(normalizeBloggerIdentity).filter(Boolean).map(function (identity) { return "identity:" + identity; });
+          if (!isReport && item.bloggerId != null) keys.push("id:" + String(item.bloggerId));
+          keys.filter(function (key,i,array) { return array.indexOf(key) === i; }).forEach(function (key) {
+            (index[key] || (index[key] = [])).push({record:item,position:position});
+          });
+        });
+        return index;
+      }
+      function indexedKpiExitSources(blogger,index) {
+        var keys = bloggerIdentityAliases(blogger).map(function (identity) { return "identity:" + identity; });
+        keys.push("id:" + String(blogger.id));
+        var seen = Object.create(null);
+        var found = [];
+        keys.forEach(function (key) {
+          (index[key] || []).forEach(function (entry) {
+            if (seen[entry.position]) return;
+            seen[entry.position] = true;
+            found.push(entry);
+          });
+        });
+        return found.sort(function (a,b) { return a.position - b.position; }).map(function (entry) { return entry.record; });
+      }
+      function confirmedKpiExitForBlogger(blogger,sources) {
+        sources = sources && Array.isArray(sources.reports) && Array.isArray(sources.placements) ? sources : null;
         var evidenceByDate = {};
-        evidenceReports.filter(function (report) {
+        (sources ? sources.reports : evidenceReports).filter(function (report) {
           var reach = Number(report.reach || 0);
           return (!report.status || report.status === "Подтверждено") &&
             Array.isArray(report.images) && report.images.length > 0 &&
             Number.isFinite(reach) && reach > 0 && reach <= MAX_BLOGGER_REACH &&
-            placementMatchesBlogger({tag:report.blogger,bloggerLink:report.blogger},blogger);
+            (sources || placementMatchesBlogger({tag:report.blogger,bloggerLink:report.blogger},blogger));
         }).forEach(function (report) {
           var date = String(report.date || "");
           var reach = Number(report.reach || 0);
@@ -3143,8 +3172,8 @@
         });
 
         var placementsByDate = {};
-        synchronizedPlacementRecords().filter(function (item) {
-          return placementMatchesBlogger(item,blogger);
+        (sources ? sources.placements : synchronizedPlacementRecords()).filter(function (item) {
+          return sources || placementMatchesBlogger(item,blogger);
         }).forEach(function (item) {
           var date = placementIsoDate(item);
           if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) return;
@@ -3177,8 +3206,11 @@
         };
       }
       function automaticKpiMonthBloggers(month) {
+        // Reuse identity indexes within this calculation; never reuse stale facts after edits.
+        var reportsIndex = kpiExitSourceIndex(evidenceReports,true);
+        var placementsIndex = kpiExitSourceIndex(synchronizedPlacementRecords(),false);
         return groupedKpiBloggers().map(function (blogger) {
-          var confirmedExit = confirmedKpiExitForBlogger(blogger);
+          var confirmedExit = confirmedKpiExitForBlogger(blogger,{reports:indexedKpiExitSources(blogger,reportsIndex),placements:indexedKpiExitSources(blogger,placementsIndex)});
           var createdInMonth = monthFromDateValue(blogger.createdAt) === month;
           var firstExitInMonth = monthFromDateValue(confirmedExit.date) === month;
           if (!createdInMonth && !firstExitInMonth) return null;
@@ -4511,7 +4543,7 @@
         if (!date || !date.parentElement) return;
         var field = document.createElement("div");
         field.className = "field field-wide";
-        field.innerHTML = '<label>Конкретное размещение</label><select class="select" id="evidencePlacementKeys" multiple size="5" required></select><span id="evidencePlacementMeta" style="font-size:10px;color:var(--muted)">Сначала выберите блогера и дату выхода</span>';
+        field.innerHTML = '<label for="evidencePlacementKeys">Конкретное размещение — выберите выход из списка</label><select class="select" id="evidencePlacementKeys" multiple size="5"></select><span id="evidencePlacementMeta" style="font-size:10px;color:var(--muted)">Сначала выберите блогера и дату выхода</span>';
         date.parentElement.insertAdjacentElement("afterend",field);
         date.addEventListener("change",updateEvidencePlacementChoices);
       }
@@ -4648,17 +4680,28 @@
         updateEvidencePlacementChoices();
         return selected;
       }
+      function evidencePlacementCandidates(blogger,date) {
+        var identity = normalizeBloggerIdentity(blogger);
+        if (!identity || !date) return [];
+        var cards = ensureBloggerLookupIndex().byIdentity[identity] || [];
+        return synchronizedPlacementRecords().filter(function (item) {
+          if (placementIsoDate(item) !== date) return false;
+          return cards.some(function (card) { return placementMatchesBlogger(item,card); }) ||
+            [item.sourceKey,item.tag,item.bloggerLink].some(function (value) { return normalizeBloggerIdentity(value) === identity; });
+        });
+      }
       function updateEvidencePlacementChoices() {
         ensureEvidencePlacementUi();
         var select = document.getElementById("evidencePlacementKeys");
         if (!select) return;
         var blogger = document.getElementById("evidenceBlogger").value;
         var date = document.getElementById("evidenceDate").value;
-        var identity = normalizeBloggerIdentity(blogger);
         var previous = Array.from(select.selectedOptions || []).map(function (option) { return option.value; });
-        var candidates = synchronizedPlacementRecords().filter(function (item) {
-          return normalizeBloggerIdentity(item.sourceKey || item.tag || item.bloggerLink) === identity && (!date || placementIsoDate(item) === date);
-        });
+        var candidates = evidencePlacementCandidates(blogger,date);
+        // An empty required select blocks the submit event before our unlinked-report fallback.
+        select.required = candidates.length > 0;
+        select.disabled = candidates.length === 0;
+        select.size = Math.max(2,Math.min(5,candidates.length));
         select.innerHTML = candidates.map(function (item) {
           var key = reachAuditPlacementKey(item);
           return '<option value="' + safeText(key) + '" data-project="' + safeText(placementDirection(item)) + '" data-format="' + safeText(item.type || "") + '">#' + safeText(item.id) + ' · ' + displayIsoDate(placementIsoDate(item)) + ' · ' + safeText(placementDirection(item)) + ' · ' + safeText(item.type || "формат") + ' · гарант ' + number(item.guaranteed || 0) + '</option>';
@@ -4670,7 +4713,7 @@
         if (Object.keys(projectOptions).length > 1 && Object.keys(projectOptions).every(function (project) { return projectOptions[project].length === 1; })) {
           Object.keys(projectOptions).forEach(function (project) { projectOptions[project][0].selected = true; });
         }
-        document.getElementById("evidencePlacementMeta").textContent = candidates.length ? "Найдено размещений: " + candidates.length + ". Выберите конкретный выход; для разных реальных интеграций можно выбрать несколько." : "На выбранную дату размещение не найдено. Отчёт сохранится без связи и попадёт администратору на привязку.";
+        document.getElementById("evidencePlacementMeta").textContent = candidates.length ? "Найдено размещений: " + candidates.length + ". Выберите выход в списке; вводить текст не нужно. Для нескольких интеграций используйте Ctrl (⌘ на Mac)." : "На выбранную дату размещение не найдено. Отчёт сохранится без связи и попадёт администратору на привязку.";
       }
       function populateEvidenceBloggers(selected) {
         var candidates = evidenceBloggerCandidates(selected);
@@ -4833,9 +4876,10 @@
         openLayer(drawer);
       }
       function placementRowsForBlogger(blogger) {
-        return placementRecords.concat(virtualCardReachRecords).filter(function (item) {
-          return placementMatchesBlogger(item,blogger);
-        }).sort(function (a,b) { return String(b.sortDate || "").localeCompare(String(a.sortDate || "")); });
+        if (!placementBloggerLookupCache || placementBloggerLookupCache.records !== placementRecords || placementBloggerLookupCache.count !== placementRecords.length || placementBloggerLookupCache.virtualCount !== virtualCardReachRecords.length) {
+          placementBloggerLookupCache = {records:placementRecords,count:placementRecords.length,virtualCount:virtualCardReachRecords.length,index:kpiExitSourceIndex(placementRecords.concat(virtualCardReachRecords),false)};
+        }
+        return indexedKpiExitSources(blogger,placementBloggerLookupCache.index).sort(function (a,b) { return String(b.sortDate || "").localeCompare(String(a.sortDate || "")); });
       }
       function manualCardReachPlacement(blogger) {
         var existing = virtualCardReachRecords.find(function (item) { return String(item.bloggerId) === String(blogger.id); });

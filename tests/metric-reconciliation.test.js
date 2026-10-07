@@ -306,6 +306,75 @@ test("evidence blogger search tolerates one typo and keeps unlinked reports save
   assert.match(source,/!placementLinks\.length && placementSelect && placementSelect\.options\.length/);
 });
 
+test("evidence placement lookup handles aliases and card IDs without joining different dates",() => {
+  const card = {id:7,name:"@new_name",_identityAliases:["old_name"]};
+  const placements = [
+    {id:1,tag:"old_name",date:"2026-10-01"},
+    {id:2,bloggerId:"7",tag:"different",date:"2026-10-01"},
+    {id:3,sourceKey:"legacy",bloggerLink:"https://instagram.com/new_name/",date:"2026-10-01"},
+    {id:4,tag:"new_name",date:"2026-10-02"},
+    {id:5,tag:"unrelated",date:"2026-10-01"},
+  ];
+  const context = {String,Array,ensureBloggerLookupIndex:()=>({byIdentity:{new_name:[card]}}),
+    synchronizedPlacementRecords:()=>placements,placementIsoDate:item=>item.date};
+  vm.createContext(context);
+  ["normalizeBloggerIdentity","bloggerIdentityAliases","placementMatchesBlogger","evidencePlacementCandidates"].forEach(name=>vm.runInContext(extractFunction(name),context));
+  assert.deepEqual(Array.from(context.evidencePlacementCandidates("@new_name","2026-10-01"),item=>item.id),[1,2,3]);
+  assert.equal(context.evidencePlacementCandidates("@new_name","").length,0);
+});
+
+test("empty evidence placement choices do not block form validation and become required when populated",() => {
+  let candidates = [];
+  const select = {options:[],required:true,disabled:false};
+  Object.defineProperty(select,"innerHTML",{set:html=>{select.options=Array.from(html.matchAll(/value="([^"]*)" data-project="([^"]*)"/g),match=>({value:match[1],dataset:{project:match[2]},selected:false}));}});
+  Object.defineProperty(select,"selectedOptions",{get:()=>select.options.filter(option=>option.selected)});
+  const nodes = {evidencePlacementKeys:select,evidenceBlogger:{value:"@blogger"},evidenceDate:{value:"2026-10-01"},evidencePlacementMeta:{textContent:""}};
+  const update = runFunction("updateEvidencePlacementChoices",{Array,Object,Math,
+    document:{getElementById:id=>nodes[id]},ensureEvidencePlacementUi(){},
+    evidencePlacementCandidates:()=>candidates,reachAuditPlacementKey:item=>String(item.id),
+    safeText:String,displayIsoDate:value=>value,placementIsoDate:item=>item.date,
+    placementDirection:item=>item.project,number:String});
+  update();
+  assert.equal(select.required,false);
+  assert.equal(select.disabled,true);
+  assert.match(nodes.evidencePlacementMeta.textContent,/сохранится без связи/);
+  candidates=[{id:1,date:"2026-10-01",project:"ЛН"}];
+  update();
+  assert.equal(select.required,true);
+  assert.equal(select.disabled,false);
+  assert.equal(select.selectedOptions[0].value,"1");
+  candidates.push({id:2,date:"2026-10-01",project:"ЛН"});
+  update();
+  assert.deepEqual(select.selectedOptions.map(option=>option.value),["1"]);
+  candidates=[];
+  update();
+  assert.equal(select.required,false);
+  assert.equal(select.selectedOptions.length,0);
+  assert.doesNotMatch(extractFunction("ensureEvidencePlacementUi"),/size="5" required/);
+});
+
+test("indexed KPI sources match full scans and retain separate same-day placements",() => {
+  const blogger = {id:7,name:"@new_name",_identityAliases:["old_name"]};
+  const placements = [
+    {id:1,tag:"old_name",sortDate:"2026-09-01",actual:100,manager:"Manager"},
+    {id:2,bloggerId:"7",sortDate:"2026-09-01",actual:200},
+    {id:3,tag:"other",sortDate:"2026-08-01",actual:9000},
+  ];
+  const reports = [{blogger:"@old_name",date:"2026-09-01",reach:300,status:"Подтверждено",images:["proof"]}];
+  const context = {String,Array,Object,Number,Math,MAX_BLOGGER_REACH:1000000000,
+    evidenceReports:reports,synchronizedPlacementRecords:()=>placements,
+    placementIsoDate:item=>item.sortDate,placementFormatActuals:{},
+    placementOverrideKey:item=>String(item.id),effectivePlacementActual:item=>item.actual,dailyDateLabel:String};
+  vm.createContext(context);
+  ["normalizeBloggerIdentity","bloggerIdentityAliases","placementMatchesBlogger","kpiExitSourceIndex","indexedKpiExitSources","confirmedKpiExitForBlogger"].forEach(name=>vm.runInContext(extractFunction(name),context));
+  const indexed = ()=>({reports:context.indexedKpiExitSources(blogger,context.kpiExitSourceIndex(reports,true)),placements:context.indexedKpiExitSources(blogger,context.kpiExitSourceIndex(placements,false))});
+  assert.deepEqual(Array.from(indexed().placements,item=>item.id),[1,2]);
+  assert.deepEqual(context.confirmedKpiExitForBlogger(blogger,indexed()),context.confirmedKpiExitForBlogger(blogger));
+  reports[0].status="На проверке";
+  assert.deepEqual(context.confirmedKpiExitForBlogger(blogger,indexed()),context.confirmedKpiExitForBlogger(blogger));
+  assert.equal(context.confirmedKpiExitForBlogger(blogger,indexed()).eligible,false);
+});
+
 test("finance uses the two project sheets for clicks, costs and ROI",() => {
   const facts = {"ЛН":{exits:2,clicks:20},"FIT PRO":{exits:1,clicks:10}};
   const context = {
@@ -429,11 +498,14 @@ test("all bloggers created in the month are present in KPI and a manual row only
     ],
     monthFromDateValue:value => String(value || "").slice(0,7),
     groupedKpiBloggers:() => context.bloggers,
+    evidenceReports:[],synchronizedPlacementRecords:()=>[],
+    normalizeBloggerIdentity:value => String(value || "").toLowerCase().replace(/^@/,""),
+    bloggerIdentityAliases:blogger => [blogger.name],
     confirmedKpiExitForBlogger:blogger => blogger.id === 1 ? {eligible:true,factReach:1200,date:"2026-08-20",dates:["2026-08-20"],manager:"Manager",reason:"Подтверждено"} : {eligible:false,factReach:0,date:"",dates:[],manager:"",reason:"Ожидается"},
     dailyDateLabel:value => value,
     kpiMonthBloggers:[{month:"2026-08",bloggerKey:"1",bloggerName:"One",manager:"Manager",factReach:150,note:"checked"}],
   };
-  ["newBloggersForMonth","automaticKpiMonthBloggers","resolvedKpiMonthBloggers"].forEach(name => {
+  ["kpiExitSourceIndex","indexedKpiExitSources","newBloggersForMonth","automaticKpiMonthBloggers","resolvedKpiMonthBloggers"].forEach(name => {
     vm.createContext(context);
     vm.runInContext(extractFunction(name),context);
   });
@@ -484,7 +556,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=129/);
+  assert.match(index,/october-exits-v124\.js\?v=130/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -497,9 +569,9 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v127\.js\?v=129/);
+  assert.match(index,/blogger-base-v127\.js\?v=130/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v129-reach-index/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v130-evidence-save/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
 });
