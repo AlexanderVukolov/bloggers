@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.102.0";
+import { accessFor, operationRoute, filterShared, sharedWrite, scopedFactsRoute, guardLegacyResources, loadModel, reportInScope, legacyCommit } from "./operations.mjs";
+import { permission, change, canonical, placementKey } from "./operations-core.mjs";
 
 const allowedOrigins = new Set([
   "https://alexandervukolov.github.io",
@@ -70,7 +72,7 @@ function employeePayload(row: any, role: string) {
   };
 }
 
-function writable(role: string) { return role === "leader" || role === "manager" || role === "assistant"; }
+function writable(role: string) { return role === "leader" || role === "supervisor" || role === "manager" || role === "assistant"; }
 function systemMonth() { const now = new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`; }
 function kpiIdentity(value: unknown) {
   let text = String(value || "").trim().toLowerCase();
@@ -95,7 +97,7 @@ function kpiPlacementDate(item: any) {
   return match ? `${match[3]}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}` : "";
 }
 function kpiPlacementKey(item: any) {
-  return ["placement-v2", item?.sourceKey || item?.tag || "", item?.sortDate || item?.start || "", item?.type || "", item?.dealType || "", item?.id == null ? "" : item.id].join("|");
+  return item?.stablePlacementKey || ["placement-v2", item?.sourceKey || item?.tag || "", item?.sortDate || item?.start || "", item?.type || "", item?.dealType || "", item?.id == null ? "" : item.id].join("|");
 }
 function kpiPlacementMatchesCard(item: any, cardKey: string, card: any) {
   const cardKeys = [cardKey, card?.id, ...(Array.isArray(card?._kpiKeys) ? card._kpiKeys : []), ...(Array.isArray(card?.duplicateSourceIds) ? card.duplicateSourceIds : [])].filter((value) => value != null).map(String);
@@ -131,7 +133,7 @@ async function signedEvidenceReports(admin: any, rows: any[]) {
       urls = (data || []).map((item: any) => item.signedUrl).filter(Boolean);
     }
     const links = Array.isArray(row.blogger_evidence_placement_links) ? row.blogger_evidence_placement_links : [];
-    return { id: row.id, blogger: row.blogger, date: row.exit_date, reach: Number(row.reach || 0), clicks: Number(row.clicks || 0), uploader: row.uploader, status: row.status || "Подтверждено", comment: row.comment || "", createdAt: row.created_at, images: urls, placementKeys: links.map((link: any) => String(link.placement_key || "")).filter(Boolean), placementLinks: links.map((link: any) => ({ placementKey: String(link.placement_key || ""), project: String(link.project || ""), format: String(link.format || "") })).filter((link: any) => link.placementKey) };
+    return { revision: await sha256Hex(canonical({row:Object.fromEntries(Object.entries(row).filter(([key])=>key!=="blogger_evidence_placement_links")),links:links.map(({placement_key,project,format}:any)=>({placement_key,project,format})).sort((a:any,b:any)=>a.placement_key.localeCompare(b.placement_key))})), id: row.id, bloggerId:row.blogger_id, blogger: row.blogger, date: row.exit_date, reach: Number(row.reach || 0), clicks: Number(row.clicks || 0), uploader: row.uploader, status: row.status || "Подтверждено", comment: row.comment || "", createdAt: row.created_at, images: urls, placementKeys: links.map((link: any) => String(link.placement_key || "")).filter(Boolean), placementLinks: links.map((link: any) => ({ placementKey: String(link.placement_key || ""), project: String(link.project || ""), format: String(link.format || "") })).filter((link: any) => link.placementKey) };
   }));
 }
 
@@ -385,6 +387,7 @@ async function readAllSharedStateRows(admin: any, role: string, since: string) {
 }
 
 Deno.serve(async (request: Request) => {
+  try {
   if (request.method === "OPTIONS") {
     const origin = request.headers.get("origin") || "";
     if (!allowedOrigins.has(origin)) return new Response(null, { status: 403, headers: corsHeaders(request) });
@@ -437,7 +440,13 @@ Deno.serve(async (request: Request) => {
   const profile: any = result.data;
   if (!profile || !profile.is_active) return json(request, { error: "Кабинет сотрудника не активен" }, 403);
   if (!profile.is_admin && profile.dept !== "bloggers") return json(request, { error: "Нет доступа к отделу блогеров" }, 403);
-  const role = appRole(profile);
+  const access = await accessFor(admin,profile);
+  const role = access.role === "owner" ? "leader" : access.role === "supervisor" ? "supervisor" : access.role;
+  const operationalResult = await operationRoute({admin,profile,access,path,request,url});
+  if (operationalResult !== null) return json(request,operationalResult);
+  const factsResult = await scopedFactsRoute(admin,profile,access,path,request);
+  if (factsResult !== null) return json(request,factsResult);
+  await guardLegacyResources(admin,profile,access,path,request,url);
 
   if (path === "/api/kpi-regulation") {
     if (request.method !== "GET") return json(request, { error: "Метод не поддерживается" }, 405);
@@ -449,7 +458,7 @@ Deno.serve(async (request: Request) => {
 
   if (path === "/whoami") {
     const { data: employee } = await admin.from("blogger_employees").select("*").or(`profile_id.eq.${profile.id},email.eq.${profile.email}`).maybeSingle();
-    return json(request, { profile, appRole: role, employee: employee ? employeePayload(employee, role) : null });
+    return json(request, { profile: {...profile,is_admin:access.role === "owner"}, appRole: role, accessRole:access.role, permissions:access.permissions, employee: employee ? employeePayload(employee, role) : null });
   }
 
   if (path === "/api/reach-actuals") {
@@ -689,13 +698,13 @@ Deno.serve(async (request: Request) => {
       const since = url.searchParams.get("since") || "";
       try {
         const data = await readAllSharedStateRows(admin, role, since);
-        const records = data.map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt: row.updated_at, updatedBy: row.updated_by }));
+        const records = filterShared(data,access).map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt: row.updated_at, updatedBy: row.updated_by }));
         return json(request, { records, latestUpdatedAt: records.at(-1)?.updatedAt || since, count: records.length });
       } catch (error) {
         return json(request, { error: error instanceof Error ? error.message : "Не удалось загрузить общую базу" }, 500);
       }
     }
-    if (request.method === "POST") { const body = await request.json().catch(() => null); const raw = Array.isArray(body?.records) ? body.records : body?.namespace ? [body] : []; if (!raw.length || raw.length > 500) return json(request, { error: "Передайте от 1 до 500 записей" }, 400); const updatedAt = new Date().toISOString(); const records = []; for (const item of raw) { const namespace = String(item?.namespace || ""); const key = String(item?.key || "").trim().slice(0, 300); if (!sharedNamespaces.has(namespace) || !key || (sharedAdminOnly.has(namespace) ? role !== "leader" : !writable(role))) return json(request, { error: "Недостаточно прав или неизвестный раздел" }, 403); const valueText = JSON.stringify(item.value); if (valueText.length > 750000) return json(request, { error: "Запись слишком большая" }, 400); records.push({ namespace, record_key: key, value_json: item.value, updated_at: updatedAt, updated_by: userId }); } const { error } = await admin.from("blogger_shared_state").upsert(records); if (error) return json(request, { error: error.message }, 500); return json(request, { records: records.map((row: any) => ({ namespace: row.namespace, key: row.record_key, value: row.value_json, updatedAt, updatedBy: userId })), latestUpdatedAt: updatedAt }); }
+    if (request.method === "POST") { const body = await request.json().catch(() => null); const raw = Array.isArray(body?.records) ? body.records : body?.namespace ? [body] : []; return json(request,await sharedWrite(admin,profile,access,raw)); }
   }
 
   if (path === "/api/admin-summary") {
@@ -779,26 +788,30 @@ Deno.serve(async (request: Request) => {
 
   if (path === "/api/evidence-reports") {
     await ensureBucket(admin);
-    if (request.method === "GET") { const { data, error } = await admin.from("blogger_evidence_reports").select("*,blogger_evidence_placement_links(placement_key,project,format)").order("created_at", { ascending: false }); if (error) return json(request, { error: error.message }, 500); return json(request, { reports: await signedEvidenceReports(admin, data || []) }); }
+    if (request.method === "GET") { const { data, error } = await admin.from("blogger_evidence_reports").select("*,blogger_evidence_placement_links(placement_key,project,format)").order("created_at", { ascending: false }); if (error) return json(request, { error: error.message }, 500); const m = await loadModel(admin); return json(request, { reports: await signedEvidenceReports(admin, (data || []).filter((r:any)=>!r.excluded_from_calculations && reportInScope(m,r,access))) }); }
     if (request.method === "PATCH") {
-      if (role !== "leader") return json(request, { error: "Проверять фактические охваты может только администратор" }, 403);
-      const body = await request.json().catch(() => null);
-      const id = String(body?.id || "");
-      const status = String(body?.status || "");
-      const reach = Number(body?.reach);
-      const placementLinks = evidencePlacementLinks(body?.placementLinks ?? body?.placementKeys);
-      const allowedStatuses = new Set(["На проверке", "Подтверждено", "Требует уточнения"]);
-      if (!/^[0-9a-f-]{36}$/i.test(id) || !allowedStatuses.has(status) || !Number.isFinite(reach) || reach < 0 || reach > 100000000) return json(request, { error: "Проверьте статус и факт охвата" }, 400);
-      const { data, error } = await admin.from("blogger_evidence_reports").update({ status, reach: Math.round(reach) }).eq("id", id).select("*").maybeSingle();
-      if (error) return json(request, { error: error.message }, 500);
-      if (!data) return json(request, { error: "Отчёт не найден" }, 404);
-      if (body?.placementLinks != null || body?.placementKeys != null) {
-        try { await replaceEvidencePlacementLinks(admin, id, placementLinks, userId); }
-        catch (linkError: any) { return json(request, { error: linkError?.message || "Не удалось связать отчёт с размещением" }, 500); }
+      if (role !== "leader" && !permission(access,"edit_work")) return json(request,{error:"Недостаточно прав"},403);
+      const body = await request.json();
+      const m = await loadModel(admin), before = m.reports.find((r:any)=>r.id===body.id);
+      if (!before) return json(request,{error:"Отчёт не найден"},404);
+      const oldLinks = m.links.filter((l:any)=>l.report_id===body.id);
+      if (body.expectedRevision !== await sha256Hex(canonical({row:before,links:oldLinks.map(({placement_key,project,format}:any)=>({placement_key,project,format})).sort((a:any,b:any)=>a.placement_key.localeCompare(b.placement_key))}))) return json(request,{error:"Отчёт изменён. Обновите страницу.",code:"CONFLICT"},409);
+      const reach=Number(body.reach),status=String(body.status);
+      if (!Number.isInteger(reach)||reach<0||reach>100000000||!["На проверке","Подтверждено","Требует уточнения"].includes(status)) return json(request,{error:"Проверьте статус и охват"},400);
+      const changes:any[]=[change("blogger_evidence_reports",before,{...before,status,reach},{id:before.id})];
+      let links=oldLinks;
+      if (body.placementLinks != null || body.placementKeys != null) {
+        if (role!=="leader"&&!permission(access,"relink")) return json(request,{error:"Недостаточно прав на изменение связей"},403);
+        const requested=evidencePlacementLinks(body.placementLinks??body.placementKeys);
+        links=requested.map((l:any)=>({report_id:before.id,placement_key:l.placementKey,project:l.project,format:l.format}));
+        for(const l of links) if(![...m.placements.values()].some((p:any)=>placementKey(p)===l.placement_key))return json(request,{error:"Неизвестное размещение"},400);
+        for(const l of oldLinks)if(!links.some((n:any)=>n.placement_key===l.placement_key))changes.push(change("blogger_evidence_placement_links",l,null,{report_id:l.report_id,placement_key:l.placement_key}));
+        for(const l of links)changes.push(change("blogger_evidence_placement_links",oldLinks.find((old:any)=>old.placement_key===l.placement_key)||null,l,{report_id:l.report_id,placement_key:l.placement_key}));
       }
-      const { data: links } = await admin.from("blogger_evidence_placement_links").select("placement_key,project,format").eq("report_id", id);
-      const [report] = await signedEvidenceReports(admin, [{ ...data, blogger_evidence_placement_links: links || [] }]);
-      return json(request, { report });
+      await legacyCommit(admin,profile,access,changes,body.reason||"Проверка отчёта по охватам");
+      const fresh=await loadModel(admin), row=fresh.reports.find((r:any)=>r.id===before.id);
+      const [report]=await signedEvidenceReports(admin,[{...row,blogger_evidence_placement_links:fresh.links.filter((l:any)=>l.report_id===before.id)}]);
+      return json(request,{report});
     }
     if (request.method === "POST") {
       if (!writable(role)) return json(request, { error: "Недостаточно прав" }, 403);
@@ -909,4 +922,8 @@ Deno.serve(async (request: Request) => {
   }
 
   return json(request, { error: "Маршрут не найден" }, 404);
+  } catch (error:any) {
+    const known=error?.code && error?.status;
+    return json(request,{error:known?error.message:"Не удалось выполнить операцию. Повторите проверку; данные не заменены целиком.",code:known?error.code:"OPERATION_FAILED",details:known?error.details:undefined},known?error.status:500);
+  }
 });

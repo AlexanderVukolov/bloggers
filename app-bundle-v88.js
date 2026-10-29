@@ -318,7 +318,7 @@
         return [item.sourceKey || item.tag || "",item.sortDate || item.start || "",item.type || "",item.dealType || ""].join("|");
       }
       function placementOverrideKey(item) {
-        return ["placement-v2",item.sourceKey || item.tag || "",item.sortDate || item.start || "",item.type || "",item.dealType || "",item.id == null ? "" : item.id].join("|");
+        return item.stablePlacementKey || ["placement-v2",item.sourceKey || item.tag || "",item.sortDate || item.start || "",item.type || "",item.dealType || "",item.id == null ? "" : item.id].join("|");
       }
       function warmupIso(day,month,year) {
         var value = String(year) + "-" + String(month).padStart(2,"0") + "-" + String(day).padStart(2,"0");
@@ -2189,6 +2189,7 @@
         sessionStorage.setItem("nslBloggers", JSON.stringify(bloggers));
       }
       var sharedStateLastSync = "";
+      var sharedVersions = {};
       var sharedStateLastSuccessfulFetch = 0;
       var sharedStateHydrating = false;
       var sharedStateHydrationPromise = null;
@@ -2207,7 +2208,7 @@
         }));
       }
       function sharedStateRecord(namespace,key,value) {
-        return {namespace:namespace,key:String(key),value:sharedStateClean(value)};
+        return {namespace:namespace,key:String(key),value:sharedStateClean(value),expectedUpdatedAt:sharedVersions[namespace+"|"+String(key)]||null};
       }
       function sharedBloggerRecord(blogger) { return sharedStateRecord("blogger",blogger.id,blogger); }
       function sharedNewBloggerRecord(blogger) { return sharedStateRecord("blogger_create",blogger.id,blogger); }
@@ -2252,6 +2253,7 @@
           if (!response.ok) return response.json().catch(function () { return {}; }).then(function (data) { throw new Error(data.error || "Не удалось синхронизировать изменения"); });
           return response.json();
         }).then(function (data) {
+          (data.records||[]).forEach(function(r){sharedVersions[r.namespace+"|"+r.key]=r.updatedAt;});
           sharedStateLastSync = data.latestUpdatedAt || sharedStateLastSync;
           sharedStateStatus = "ready";
           if (sharedStateChannel) sharedStateChannel.postMessage({type:"changed",updatedAt:sharedStateLastSync});
@@ -2308,6 +2310,7 @@
       function applySharedStateRecord(record) {
         if (!record || !record.namespace || !record.value) return;
         var value = record.value;
+        sharedVersions[record.namespace+"|"+record.key]=record.updatedAt;
         if (record.namespace === "bootstrap_meta") {
           importedData = {meta:value};
           datasetVersion = "secure-" + (value.snapshot || "current") + "-" + (value.bloggers || 0);
@@ -5157,7 +5160,7 @@
       function setRole(next) {
         if (next !== "leader" && bloggerEditMode) cancelBloggerEdits(true);
         role = next;
-        var names = {leader:"Администратор",manager:"Менеджер",assistant:"Ассистент",analyst:"Аналитик"};
+        var names = {supervisor:"Руководитель",leader:"Владелец",manager:"Менеджер",assistant:"Ассистент",analyst:"Аналитик"};
         document.getElementById("sideRole").textContent = names[role];
         document.querySelectorAll(".leader-only").forEach(function (el) { el.classList.toggle("hidden", role !== "leader"); });
         document.getElementById("saveBloggerBtn").classList.toggle("hidden",role !== "leader");
@@ -5199,6 +5202,7 @@
           var appRole = data.appRole || "manager";
           currentUserProfile = profile;
           currentEmployeeProfile = data.employee || null;
+          if(window.NSLOperations)window.NSLOperations.mount(apiFetch,{role:data.accessRole,permissions:data.permissions||{}},function(){return hydrateSharedState({full:true}).then(function(){return Promise.all([hydrateReachActuals(),hydratePlacementSchedules(),hydrateEvidenceReports()]);}).then(refreshAllDerivedViews);});
           employeeProfileTargetId = "";
           role = appRole;
           var name = profile.name || profile.email || "Сотрудник NSL";
