@@ -106,7 +106,7 @@ test("actual reach form searches bloggers instead of exposing the long select",(
   assert.match(source,/id="evidenceBloggerSearch" type="search"/);
   assert.match(source,/evidenceBloggerSelect\.classList\.add\("hidden"\)/);
   assert.match(source,/addEventListener\("input",updateEvidenceBloggerSearch\)/);
-  assert.match(source,/if \(!evidenceBlogger\) return showToast\("Найдите и выберите одного блогера"\)/);
+  assert.match(source,/Найдите и выберите одного блогера из актуального списка/);
 });
 
 test("weekly placement report groups by Monday and keeps missing actual reach blank",() => {
@@ -295,7 +295,7 @@ test("large reach register resolves each report once and retains both-project at
   assert.ok(both.every(row => row.factReach === 600 && row.guarantee === 1000));
 });
 
-test("evidence blogger search tolerates one typo and keeps unlinked reports saveable",() => {
+test("evidence blogger search suggests one-character typos without silently selecting them",() => {
   const context = {String,Math,Array,normalizeBloggerIdentity:value => String(value || "").trim().toLowerCase().replace(/^@/,"")};
   vm.createContext(context);
   vm.runInContext(extractFunction("bloggerIdentityDistance"),context);
@@ -304,6 +304,66 @@ test("evidence blogger search tolerates one typo and keeps unlinked reports save
   assert.match(extractFunction("updateEvidenceBloggerSearch"),/distance <= 1/);
   assert.match(source,/размещение не найдено\. Отчёт сохранится без связи/);
   assert.match(source,/!placementLinks\.length && placementSelect && placementSelect\.options\.length/);
+});
+
+test("generic platform labels never merge two different blogger nicknames",() => {
+  const normalize=value => String(value || "").trim().toLowerCase().replace(/^@/,"");
+  const context={String,Array,
+    bloggers:[{id:1,name:"@ssssssshuu",display:"ssssssshuu"},{id:2,name:"@viktoriyaok7",display:"viktoriyaok7"}],
+    synchronizedPlacementRecords:()=>[
+      {tag:"@ssssssshuu",sourceKey:"blogger-1",platform:"Instagram"},
+      {tag:"@viktoriyaok7",sourceKey:"blogger-2",platform:"Instagram"},
+    ],
+    evidenceReports:[],normalizeBloggerIdentity:normalize,
+    bloggerIdentityAliases:blogger=>[blogger.name,blogger.display].map(normalize).filter(Boolean),
+  };
+  const candidates=runFunction("evidenceBloggerCandidates",context)("");
+  const target=candidates.filter(item=>["@ssssssshuu","@viktoriyaok7"].includes(item.value));
+  assert.equal(target.length,2);
+  assert.deepEqual(Array.from(target,item=>item.value).sort(),["@ssssssshuu","@viktoriyaok7"]);
+  assert.ok(target.every(item=>!item.aliases.includes("instagram")));
+});
+
+test("typing a new evidence nickname clears the previous blogger before resolving the current query",() => {
+  const hiddenSelect={value:"@viktoriyaok7"};
+  const input={value:"@ssssssshuu",dataset:{selectedBlogger:"viktoriyaok7"}};
+  const meta={textContent:"Выбран: @viktoriyaok7"};
+  const resultSelect={innerHTML:"",value:"",size:0,classList:{hidden:true,add(){this.hidden=true;},remove(){this.hidden=false;}}};
+  const nodes={evidenceBloggerSearch:input,evidenceBlogger:hiddenSelect,evidenceBloggerSearchMeta:meta,evidenceBloggerMatches:resultSelect};
+  let placementRefreshes=0;
+  const context={String,Array,Math,Number,document:{getElementById:id=>nodes[id]},safeText:String,
+    bloggers:[{name:"@ssssssshuu",display:"ssssssshuu"},{name:"@viktoriyaok7",display:"viktoriyaok7"}],
+    synchronizedPlacementRecords:()=>[],evidenceReports:[],updateEvidencePlacementChoices:()=>placementRefreshes++};
+  vm.createContext(context);
+  ["normalizeBloggerIdentity","bloggerIdentityAliases","bloggerIdentityDistance","evidenceBloggerCandidates","updateEvidenceBloggerSearch"].forEach(name=>vm.runInContext(extractFunction(name),context));
+  assert.equal(context.updateEvidenceBloggerSearch().value,"@ssssssshuu");
+  assert.equal(hiddenSelect.value,"@ssssssshuu");
+  assert.equal(input.dataset.selectedBlogger,"ssssssshuu");
+  assert.equal(meta.textContent,"Выбран: @ssssssshuu");
+  assert.equal(placementRefreshes,1);
+  input.value="@unknown_blogger";
+  assert.equal(context.updateEvidenceBloggerSearch(),null);
+  assert.equal(hiddenSelect.value,"");
+  assert.equal(input.dataset.selectedBlogger,"");
+  assert.equal(meta.textContent,"Блогер не найден");
+});
+
+test("duplicate cards appear once in exit creation and prefer the card already linked to placements",() => {
+  const context={String,Object,Number,
+    bloggers:[
+      {id:10,name:"@viktoriyaok7",createdAt:"2026-10-01"},
+      {id:11,name:"@viktoriyaok7",createdAt:"2026-10-02"},
+      {id:12,name:"@ssssssshuu",createdAt:"2026-09-01"},
+    ],
+    placementRecords:[{sourceKey:"blogger-11"},{bloggerId:"11"},{sourceKey:"blogger-12"}],
+    createdTimestamp:item=>Date.parse(item.createdAt),
+  };
+  vm.createContext(context);
+  vm.runInContext(extractFunction("normalizeBloggerIdentity"),context);
+  vm.runInContext(extractFunction("placementBloggerSearchCards"),context);
+  const cards=context.placementBloggerSearchCards().sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  assert.equal(cards.length,2);
+  assert.equal(cards.find(card=>card.name==="@viktoriyaok7").id,11);
 });
 
 test("evidence placement lookup handles aliases and card IDs without joining different dates",() => {
@@ -652,7 +712,7 @@ test("future month compatibility patch keeps filters and warmup dates aligned",(
   assert.match(octoberPatch,/selectMonth\("exitMonthFilter",month\)/);
   assert.match(octoberPatch,/start\.value = date\.value/);
   assert.match(octoberPatch,/\},true\);/);
-  assert.match(index,/october-exits-v124\.js\?v=131/);
+  assert.match(index,/october-exits-v124\.js\?v=132/);
   assert.match(serviceWorker,/october-exits-v124\.js/);
 });
 
@@ -665,9 +725,9 @@ test("blogger directory opens the full base while placements and exits keep the 
   assert.match(bloggerBasePatch,/function showFullBloggerBase\(\)/);
   assert.match(bloggerBasePatch,/event\.isTrusted/);
   assert.match(bloggerBasePatch,/form\.addEventListener\("submit"/);
-  assert.match(index,/blogger-base-v127\.js\?v=131/);
+  assert.match(index,/blogger-base-v127\.js\?v=132/);
   assert.doesNotMatch(index,/october-bloggers-v125\.js/);
-  assert.match(serviceWorker,/nsl-bloggers-github-v131-multi-exits/);
+  assert.match(serviceWorker,/nsl-bloggers-github-v132-nickname-selection/);
   assert.match(apiSource,/staleActiveMonths/);
   assert.match(apiSource,/\.in\("month_key", staleActiveMonths\)/);
 });

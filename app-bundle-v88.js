@@ -28,7 +28,7 @@
   if (evidenceBloggerSelect && !document.getElementById("evidenceBloggerSearch")) {
     evidenceBloggerSelect.required = false;
     evidenceBloggerSelect.classList.add("hidden");
-    evidenceBloggerSelect.insertAdjacentHTML("beforebegin", '<input class="input" id="evidenceBloggerSearch" type="search" autocomplete="off" placeholder="Введите @ник, имя или ссылку" required><small id="evidenceBloggerSearchMeta">Начните вводить имя блогера</small>');
+    evidenceBloggerSelect.insertAdjacentHTML("beforebegin", '<input class="input" id="evidenceBloggerSearch" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите @ник, имя или ссылку" required><small id="evidenceBloggerSearchMeta">Начните вводить имя блогера</small><select class="select hidden" id="evidenceBloggerMatches" size="4" aria-label="Найденные блогеры"></select>');
   }
   var drawerFoot = document.getElementById("drawerFoot");
   if (drawerFoot && !document.getElementById("createPlacementFromBloggerBtn")) {
@@ -4254,6 +4254,26 @@
         refreshStaffSelectors();
         if (document.getElementById("page-calendar").classList.contains("active")) refreshExitSourceMeta();
       }
+      function placementBloggerSearchCards() {
+        var directLinks = Object.create(null);
+        placementRecords.forEach(function (item) {
+          if (item.bloggerId != null) directLinks[String(item.bloggerId)] = Number(directLinks[String(item.bloggerId)] || 0) + 1;
+          var sourceKey = String(item.sourceKey || "");
+          var idMatch = sourceKey.match(/^blogger-(.+)$/);
+          if (idMatch) directLinks[idMatch[1]] = Number(directLinks[idMatch[1]] || 0) + 1;
+        });
+        var groups = Object.create(null);
+        bloggers.forEach(function (blogger) {
+          var identity = normalizeBloggerIdentity(blogger.name || blogger.display || blogger.link) || "id:" + blogger.id;
+          (groups[identity] || (groups[identity] = [])).push(blogger);
+        });
+        return Object.keys(groups).map(function (identity) {
+          return groups[identity].slice().sort(function (a,b) {
+            return Number(directLinks[String(b.id)] || 0) - Number(directLinks[String(a.id)] || 0) ||
+              createdTimestamp(b) - createdTimestamp(a) || String(b.id).localeCompare(String(a.id));
+          })[0];
+        });
+      }
       function populatePlacementBloggerSelect() {
         var select = document.getElementById("newPlacementBlogger");
         if (!select) return;
@@ -4261,7 +4281,7 @@
         var search = document.getElementById("newPlacementBloggerSearch");
         var query = String(search ? search.value : "").trim().toLowerCase();
         var normalizedQuery = query.replace(/^@/,"");
-        var matches = bloggers.filter(function (blogger) {
+        var matches = placementBloggerSearchCards().filter(function (blogger) {
           if (!query) return true;
           return [blogger.name,blogger.display,blogger.link,blogger.sourceKey].some(function (value) {
             var text = String(value || "").toLowerCase();
@@ -4633,7 +4653,9 @@
           return {value:blogger.name || blogger.display,aliases:bloggerIdentityAliases(blogger),search:[blogger.name,blogger.display,blogger.link,blogger.sourceKey].join(" ").toLowerCase()};
         });
         synchronizedPlacementRecords().forEach(function (item) {
-          records.push({value:item.tag || item.fullName,aliases:[item.tag,item.fullName,item.bloggerLink,item.platform,item.sourceKey].map(normalizeBloggerIdentity).filter(Boolean),search:[item.tag,item.fullName,item.bloggerLink,item.platform,item.sourceKey].join(" ").toLowerCase()});
+          var platform = String(item.platform || "");
+          var platformIdentity = /^@|https?:\/\/|(?:instagram\.com|t\.me|vk\.com|vk\.ru)\//i.test(platform) ? platform : "";
+          records.push({value:item.tag || item.fullName,aliases:[item.tag,item.fullName,item.bloggerLink,platformIdentity,item.sourceKey].map(normalizeBloggerIdentity).filter(Boolean),search:[item.tag,item.fullName,item.bloggerLink,platformIdentity,item.sourceKey].join(" ").toLowerCase()});
         });
         evidenceReports.forEach(function (report) { records.push({value:report.blogger,aliases:[normalizeBloggerIdentity(report.blogger)].filter(Boolean),search:String(report.blogger || "").toLowerCase()}); });
         ["@fit_with_anna","@alexey_vlasov"].forEach(function (name) { records.push({value:name,aliases:[normalizeBloggerIdentity(name)],search:name.toLowerCase()}); });
@@ -4652,11 +4674,16 @@
         var input = document.getElementById("evidenceBloggerSearch");
         var select = document.getElementById("evidenceBlogger");
         var meta = document.getElementById("evidenceBloggerSearchMeta");
+        var resultSelect = document.getElementById("evidenceBloggerMatches");
         var query = String(input.value || "").trim().toLowerCase();
         var normalized = normalizeBloggerIdentity(query);
+        // Never keep the previous blogger while a different nickname is being typed.
+        select.value = "";
+        input.dataset.selectedBlogger = "";
+        if (resultSelect) { resultSelect.innerHTML = ""; resultSelect.classList.add("hidden"); }
         if (!query) {
-          select.value = "";
           meta.textContent = "Начните вводить имя блогера";
+          updateEvidencePlacementChoices();
           return null;
         }
         var candidates = evidenceBloggerCandidates("");
@@ -4664,21 +4691,38 @@
           var text = item.search;
           return text.indexOf(query) >= 0 || (normalized && text.replace(/@/g,"").indexOf(normalized) >= 0);
         });
-        var exact = matches.find(function (item) { return item.aliases.indexOf(normalized) >= 0; });
-        var corrected = false;
-        if (!exact && normalized.length >= 5) {
+        var exactMatches = matches.filter(function (item) { return item.aliases.indexOf(normalized) >= 0; });
+        var exact = exactMatches.length === 1 ? exactMatches[0] : null;
+        var suggestions = matches;
+        if (!exact && !matches.length && normalized.length >= 5) {
           var fuzzy = candidates.map(function (item) {
             return {item:item,distance:item.aliases.reduce(function (best,alias) { return Math.min(best,bloggerIdentityDistance(normalized,alias)); },Number.MAX_SAFE_INTEGER)};
           }).filter(function (item) { return item.distance <= 1; });
           var bestDistance = fuzzy.reduce(function (best,item) { return Math.min(best,item.distance); },Number.MAX_SAFE_INTEGER);
-          var bestMatches = fuzzy.filter(function (item) { return item.distance === bestDistance; });
-          if (bestMatches.length === 1) { exact = bestMatches[0].item; corrected = true; }
+          suggestions = fuzzy.filter(function (item) { return item.distance === bestDistance; }).map(function (item) { return item.item; });
         }
         var selected = exact || (matches.length === 1 ? matches[0] : null);
-        select.value = selected ? selected.value : "";
-        meta.textContent = selected ? "Выбран: " + selected.value + (corrected ? " · исправлена опечатка" : "") : matches.length ? "Найдено: " + matches.length + " · уточните запрос" : "Блогер не найден";
+        if (selected) {
+          select.value = selected.value;
+          input.dataset.selectedBlogger = normalizeBloggerIdentity(selected.value);
+          meta.textContent = "Выбран: " + selected.value;
+        } else if (suggestions.length) {
+          meta.textContent = matches.length ? "Найдено: " + matches.length + " · выберите блогера в списке" : "Проверьте ник · возможно, вы имели в виду:";
+          if (resultSelect) {
+            resultSelect.innerHTML = '<option value="">Выберите блогера…</option>' + suggestions.slice(0,20).map(function (item) { return '<option value="' + safeText(item.value) + '">' + safeText(item.value) + '</option>'; }).join("");
+            resultSelect.classList.remove("hidden");
+            resultSelect.size = Math.min(5,suggestions.length + 1);
+          }
+        } else meta.textContent = "Блогер не найден";
         updateEvidencePlacementChoices();
         return selected;
+      }
+      function selectEvidenceBloggerMatch() {
+        var resultSelect = document.getElementById("evidenceBloggerMatches");
+        var value = resultSelect && resultSelect.value || "";
+        if (!value) return;
+        document.getElementById("evidenceBloggerSearch").value = value;
+        updateEvidenceBloggerSearch();
       }
       function evidencePlacementCandidates(blogger,date) {
         var identity = normalizeBloggerIdentity(blogger);
@@ -5910,6 +5954,7 @@
       document.getElementById("acceptanceChecklist").addEventListener("change",renderAcceptanceStatus);
       document.getElementById("addEvidenceBtn").addEventListener("click", function () { openEvidenceForm(""); });
       document.getElementById("evidenceBloggerSearch").addEventListener("input",updateEvidenceBloggerSearch);
+      document.getElementById("evidenceBloggerMatches").addEventListener("change",selectEvidenceBloggerMatch);
       document.querySelectorAll(".evidence-add-btn").forEach(function (button) {
         button.addEventListener("click", function () { openEvidenceForm(button.dataset.evidenceBlogger); });
       });
@@ -5931,9 +5976,9 @@
       });
       document.getElementById("evidenceForm").addEventListener("submit", function (event) {
         event.preventDefault();
-        updateEvidenceBloggerSearch();
+        var selectedEvidenceBlogger = updateEvidenceBloggerSearch();
         var evidenceBlogger = document.getElementById("evidenceBlogger").value;
-        if (!evidenceBlogger) return showToast("Найдите и выберите одного блогера");
+        if (!selectedEvidenceBlogger || !evidenceBlogger || normalizeBloggerIdentity(evidenceBlogger) !== document.getElementById("evidenceBloggerSearch").dataset.selectedBlogger) return showToast("Найдите и выберите одного блогера из актуального списка");
         var placementSelect = document.getElementById("evidencePlacementKeys");
         var placementLinks = Array.from(placementSelect && placementSelect.selectedOptions || []).map(function (option) { return {placementKey:option.value,project:option.dataset.project || "",format:option.dataset.format || ""}; });
         if (!placementLinks.length && placementSelect && placementSelect.options.length) return showToast("Выберите конкретное размещение для этого отчёта");
