@@ -1,0 +1,13 @@
+create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);
+create table public.profiles ("id" uuid primary key,"name" text,"email" text,"dept" text,"role" text,"created_at" timestamp with time zone,"is_admin" boolean,"avatar_url" text,"is_active" boolean);
+create table public.blogger_shared_state ("namespace" text,"record_key" text,"value_json" jsonb,"updated_at" timestamp with time zone,"updated_by" uuid,primary key (namespace,record_key));
+create table public.blogger_reach_actuals ("placement_key" text,"blogger_key" text,"actual" bigint,"facts_json" jsonb,"comment" text,"updated_at" timestamp with time zone,"updated_by" uuid,primary key (placement_key));
+create table public.blogger_placement_schedules ("placement_key" text,"warmup_start" date,"warmup_end" date,"updated_at" timestamp with time zone,"updated_by" uuid,primary key (placement_key));
+create table public.blogger_employees ("id" text,"profile_id" uuid,"name" text,"email" text,"role" text,"assigned_manager" text,"status" text,"base_salary" bigint,"updated_at" timestamp with time zone,"history_aliases" text[],"invite_token_hash" text,"invite_expires_at" timestamp with time zone,"invited_at" timestamp with time zone,"registered_at" timestamp with time zone,primary key (id));
+create table public.blogger_kpi_adjustments ("manager" text,"month" text,"sanctions" bigint,"updated_at" timestamp with time zone,"updated_by" uuid,"manual_reach_kpi" bigint,primary key (manager,month));
+create table public.blogger_department_months ("month_key" text,"status" text,"created_at" timestamp with time zone,"closed_at" timestamp with time zone,"updated_by" uuid,primary key (month_key));
+create table public.blogger_evidence_reports ("id" uuid,"blogger" text,"exit_date" date,"reach" bigint,"clicks" bigint,"uploader" text,"status" text,"comment" text,"images_json" jsonb,"created_at" timestamp with time zone,"created_by" uuid,primary key (id));
+create table public.blogger_contracts ("id" uuid,"blogger_key" text,"contract_type" text,"file_name" text,"file_size" bigint,"mime_type" text,"object_path" text,"uploaded_at" timestamp with time zone,"uploaded_by" uuid,primary key (id));
+create table public.blogger_kpi_month_bloggers ("month" text,"blogger_key" text,"blogger_name" text,"manager" text,"fact_reach" bigint,"note" text,"created_at" timestamp with time zone,"updated_at" timestamp with time zone,"updated_by" uuid,primary key (month,blogger_key));
+create table public.blogger_evidence_placement_links ("report_id" uuid,"placement_key" text,"project" text,"format" text,"linked_at" timestamp with time zone,"linked_by" uuid,primary key (report_id,placement_key));
+

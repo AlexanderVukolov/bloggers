@@ -744,7 +744,7 @@ test("role actions stay available only to the matching employee role",() => {
   assert.match(source,/fillAssistantReportBtn"\)\.classList\.toggle\("hidden",role !== "leader" && role !== "assistant"\)/);
   assert.match(source,/var canEdit = role !== "analyst"/);
   assert.match(source,/function canEditActualReach\(\) \{\s*return \["leader","manager","assistant"\]/);
-  assert.match(apiSource,/function writable\(role: string\) \{ return role === "leader" \|\| role === "manager" \|\| role === "assistant"; \}/);
+  assert.match(apiSource,/function writable\(role: string\) \{ return role === "leader" \|\| role === "supervisor" \|\| role === "manager" \|\| role === "assistant"; \}/);
   assert.match(apiSource,/sharedAdminOnly = new Set/);
   assert.match(bloggerBasePatch,/function applyRoleActions\(\)/);
   assert.match(bloggerBasePatch,/var canOperate = role === "leader" \|\| role === "manager" \|\| role === "assistant"/);
